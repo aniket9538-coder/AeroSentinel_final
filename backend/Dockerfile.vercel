@@ -1,0 +1,46 @@
+# ==========================================
+# Stage 1: Build
+# ==========================================
+FROM eclipse-temurin:21-jdk-jammy AS build
+WORKDIR /app
+
+# Copy Maven wrapper files and POM descriptor
+COPY .mvn/ .mvn/
+COPY mvnw pom.xml ./
+
+# Normalize line endings and ensure executable permissions for Linux
+RUN sed -i 's/\r$//' mvnw && chmod +x mvnw
+
+# Resolve and pre-cache dependencies
+RUN ./mvnw dependency:resolve -B
+
+# Copy project source tree
+COPY src/ src/
+
+# Compile and package production Spring Boot executable JAR (skipping test execution)
+RUN ./mvnw clean package -DskipTests -B
+
+# ==========================================
+# Stage 2: Production Runtime
+# ==========================================
+FROM eclipse-temurin:21-jre-jammy AS runtime
+WORKDIR /app
+
+# Create dedicated non-root application user and group
+RUN groupadd -r aerosentinel && useradd -r -g aerosentinel -d /app -s /sbin/nologin aerosentinel
+
+# Copy packaged fat JAR from build stage
+COPY --from=build --chown=aerosentinel:aerosentinel /app/target/aerosentinel-backend-1.0.0.jar app.jar
+
+# Switch to unprivileged user
+USER aerosentinel
+
+# Expose container port (defaults to 8080)
+EXPOSE 8080
+
+# Environment defaults for production
+ENV SPRING_PROFILES_ACTIVE=prod \
+    JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
+
+# Launch Spring Boot; binds to 0.0.0.0 and dynamically respects $PORT
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -Dserver.address=0.0.0.0 -Dserver.port=${PORT:-8080} -jar app.jar"]

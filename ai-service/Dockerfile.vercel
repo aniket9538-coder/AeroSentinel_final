@@ -1,0 +1,43 @@
+# ==========================================
+# AeroSentinel AI & ML Inference Service
+# Production Container Image (Vercel / Cloud Container Compatible)
+# ==========================================
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install minimal system libraries for C extensions (geospatial/H3) and health probes
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy dependency definition
+COPY requirements.txt .
+
+# Install dependencies including web server (FastAPI, Uvicorn), ML serialisation, and Gemini SDK
+RUN pip install --no-cache-dir -r requirements.txt \
+    fastapi \
+    uvicorn[standard] \
+    joblib \
+    google-generativeai
+
+# Copy service codebase, ML pipelines, and model artifacts
+COPY . /app
+
+# Create unprivileged application user and adjust directory ownership
+RUN groupadd -r aerosentinel && useradd -r -g aerosentinel -d /app -s /sbin/nologin aerosentinel && \
+    chown -R aerosentinel:aerosentinel /app
+
+# Switch to non-root user
+USER aerosentinel
+
+# Expose default port
+EXPOSE 8000
+
+# Set environment defaults
+ENV PORT=8000 \
+    ENVIRONMENT=production
+
+# Launch FastAPI engine; binds to 0.0.0.0 and dynamically respects $PORT
+ENTRYPOINT ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
