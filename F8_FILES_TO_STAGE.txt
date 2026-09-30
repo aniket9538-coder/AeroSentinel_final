@@ -1,0 +1,15 @@
+backend/src/main/java/com/aerosentinel/monitoring/MonitoringController.java
+backend/src/main/java/com/aerosentinel/monitoring/MonitoringPriority.java
+backend/src/main/java/com/aerosentinel/monitoring/MonitoringPriorityConfig.java
+backend/src/main/java/com/aerosentinel/monitoring/MonitoringPriorityService.java
+backend/src/main/java/com/aerosentinel/monitoring/MonitoringRecommendationType.java
+backend/src/main/java/com/aerosentinel/monitoring/MonitoringService.java
+backend/src/main/java/com/aerosentinel/monitoring/dto/MonitoringCoverageResponse.java
+backend/src/main/java/com/aerosentinel/monitoring/dto/MonitoringPriorityResponse.java
+backend/src/main/java/com/aerosentinel/monitoring/dto/MonitoringRecommendationResponse.java
+frontend/src/components/map/MonitoringCoverageLayer.tsx
+frontend/src/components/monitoring/MonitoringRecommendationDetailCard.tsx
+frontend/src/hooks/useMonitoringRecommendations.ts
+frontend/src/pages/public/MonitoringDashboard.tsx
+frontend/src/services/monitoring.service.ts
+frontend/src/types/monitoring.ts

@@ -1,0 +1,17 @@
+ai-service/app/services/gemini_pipeline.py
+backend/src/main/java/com/aerosentinel/action/AuthorityAction.java
+backend/src/main/java/com/aerosentinel/alert/Alert.java
+backend/src/main/java/com/aerosentinel/alert/AlertRepository.java
+backend/src/main/java/com/aerosentinel/citizen/CitizenReport.java
+backend/src/main/java/com/aerosentinel/event/PollutionEvent.java
+backend/src/main/java/com/aerosentinel/event/PollutionEventRepository.java
+backend/src/main/java/com/aerosentinel/event/PollutionEventStatus.java
+backend/src/main/java/com/aerosentinel/evidence/EvidenceOrchestrationService.java
+backend/src/main/java/com/aerosentinel/hotspot/AiServiceHotspotClient.java
+backend/src/main/resources/application-dev.yml
+backend/src/main/resources/application.yml
+frontend/src/App.tsx
+frontend/src/components/layout/Sidebar.tsx
+frontend/src/components/map/PollutionMap.tsx
+frontend/src/pages/public/PollutionMap.tsx
+frontend/src/types/index.ts

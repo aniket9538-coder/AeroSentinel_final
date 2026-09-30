@@ -1,0 +1,37 @@
+{
+  "timestamp": "2025-09-13 08:00:00+00:00",
+  "h3_cell_id": "88608852c3fffff",
+  "station_id": "site_5766",
+  "hotspot": {
+    "score": 0.001,
+    "is_potential_hotspot": false,
+    "risk_level": "LOW",
+    "model_version": "hotspot_rf_v1.0"
+  },
+  "forecast": {
+    "pm25_t_plus_1": 10.8,
+    "unit": "ug/m3",
+    "model_version": "forecast_rf_v1.0"
+  },
+  "confidence": {
+    "overall_confidence": 0.42,
+    "data_quality_score": 1.0,
+    "coverage_confidence": 0.2,
+    "model_certainty": 0.9,
+    "nearest_station_distance_km": 124.07,
+    "epistemic_uncertainty_flag": 1
+  },
+  "evidence_signals": [
+    {
+      "type": "MONITORING_UNCERTAINTY",
+      "source": "NETWORK_TOPOLOGY",
+      "feature": "monitoring_coverage_gap_flag",
+      "value": 1,
+      "baseline": 0,
+      "direction": "SPARSE_COVERAGE",
+      "strength": "CAUTIONARY",
+      "interpretation": "Nearest ground monitor is 124.1 km away; relies on remote-sensing evidence.",
+      "timestamp": "2025-09-13 08:00:00+00:00"
+    }
+  ]
+}

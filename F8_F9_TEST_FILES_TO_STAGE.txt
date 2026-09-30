@@ -1,0 +1,16 @@
+backend/src/test/java/com/aerosentinel/evidence/EvidenceIntegrationTest.java
+backend/src/test/java/com/aerosentinel/federated/FederatedControllersIntegrationTest.java
+backend/src/test/java/com/aerosentinel/federated/FederatedNodeServiceTest.java
+backend/src/test/java/com/aerosentinel/federated/FederatedRoundServiceTest.java
+backend/src/test/java/com/aerosentinel/hotspot/HotspotIntegrationTest.java
+backend/src/test/java/com/aerosentinel/monitoring/MonitoringControllerIntegrationTest.java
+backend/src/test/java/com/aerosentinel/monitoring/MonitoringPriorityServiceTest.java
+backend/src/test/java/com/aerosentinel/monitoring/MonitoringPriorityTest.java
+backend/src/test/java/com/aerosentinel/monitoring/MonitoringRecommendationTest.java
+backend/src/test/java/com/aerosentinel/monitoring/MonitoringServiceTest.java
+federated/tests/test_coordinator.py
+federated/tests/test_e2e_orchestration.py
+federated/tests/test_local_nodes.py
+frontend/src/utils/f8_p5_monitoring_dashboard.test.ts
+frontend/src/utils/f8_p6_h3_monitoring_map.test.ts
+frontend/src/utils/f9_p6_federated_console.test.ts

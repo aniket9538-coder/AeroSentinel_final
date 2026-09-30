@@ -1,0 +1,103 @@
+{
+  "phase": "F3 — AI/ML Intelligence",
+  "project": "AeroSentinel",
+  "version": "1.0.0",
+  "created_at": "2026-09-25T15:10:00Z",
+  "random_seed": 42,
+  "dataset": {
+    "source_path": "data/processed/aligned_environmental.parquet",
+    "total_samples": 70176,
+    "train_samples": 49120,
+    "val_samples": 10528,
+    "test_samples": 10528,
+    "partition_method": "Chronological (70/15/15) - Leakage Free",
+    "spatial_coverage": {
+      "city": "Pune",
+      "bounding_box": [17.5, 72.8, 19.5, 75.0],
+      "h3_resolution": 8
+    }
+  },
+  "models": {
+    "hotspot_classifier": {
+      "artifact": "hotspot_classifier_v1.joblib",
+      "algorithm": "CalibratedClassifierCV (Platt Sigmoid) on Balanced RandomForestClassifier",
+      "target_proxy": "pm25_clean >= 60.0 ug/m3 with spatial lag anomaly ratio >= 1.15",
+      "calibration_method": "sigmoid",
+      "roc_auc": 0.9714,
+      "pr_auc": 0.7982,
+      "brier_score": 0.1128,
+      "operational_decision_threshold": 0.20,
+      "metrics_at_operational_threshold": {
+        "precision": 1.000,
+        "recall": 0.016,
+        "f1_score": 0.032
+      },
+      "baseline_comparison": {
+        "model": "Logistic Regression (Balanced)",
+        "roc_auc": 0.8640,
+        "brier_score": 0.1840
+      }
+    },
+    "pm25_forecasters": {
+      "artifact": "forecast_regressors_v1.joblib",
+      "algorithm": "RandomForestRegressor (Multi-Horizon: 1h, 3h, 6h)",
+      "target_horizons": [
+        "target_pm25_t_plus_1",
+        "target_pm25_t_plus_3",
+        "target_pm25_t_plus_6"
+      ],
+      "metrics": {
+        "T+1h": {
+          "mae": 1.73,
+          "rmse": 3.88,
+          "r2": 0.9664,
+          "prediction_interval_residuals": {"p10": -2.41, "p90": 2.15}
+        },
+        "T+3h": {
+          "mae": 3.98,
+          "rmse": 8.66,
+          "r2": 0.8326,
+          "prediction_interval_residuals": {"p10": -5.12, "p90": 4.88}
+        },
+        "T+6h": {
+          "mae": 6.37,
+          "rmse": 13.55,
+          "r2": 0.5901,
+          "prediction_interval_residuals": {"p10": -9.34, "p90": 8.76}
+        }
+      },
+      "baselines": {
+        "naive_persistence": {
+          "T+1h": {"mae": 1.35, "rmse": 3.69, "r2": 0.9696},
+          "T+3h": {"mae": 3.85, "rmse": 6.67, "r2": 0.9007},
+          "T+6h": {"mae": 5.90, "rmse": 8.93, "r2": 0.8219}
+        },
+        "historical_training_mean": {
+          "mean_value_ug_m3": 18.80,
+          "T+1h": {"mae": 18.80, "rmse": 21.74, "r2": -0.0555},
+          "T+3h": {"mae": 18.80, "rmse": 21.74, "r2": -0.0554},
+          "T+6h": {"mae": 18.79, "rmse": 21.74, "r2": -0.0553}
+        }
+      }
+    }
+  },
+  "confidence_and_uncertainty": {
+    "engine": "ConfidenceAndUncertaintyEngine",
+    "weights": {
+      "data_quality": 0.35,
+      "coverage_confidence": 0.40,
+      "model_certainty": 0.25
+    },
+    "test_set_stratification": {
+      "high_confidence_pct": 0.0,
+      "medium_confidence_pct": 88.9,
+      "low_blindspot_pct": 11.1
+    }
+  },
+  "guardrails": {
+    "target_leakage_verified": true,
+    "causality_assertions_prohibited": true,
+    "epistemic_uncertainty_flagged": true,
+    "non_negative_physical_forecast_clamped": true
+  }
+}
