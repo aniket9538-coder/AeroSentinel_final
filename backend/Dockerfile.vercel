@@ -26,8 +26,15 @@ RUN ./mvnw clean package -DskipTests -B
 FROM eclipse-temurin:21-jre-jammy AS runtime
 WORKDIR /app
 
-# Create dedicated non-root application user and group
-RUN groupadd -r aerosentinel && useradd -r -g aerosentinel -d /app -s /sbin/nologin aerosentinel
+# Install libcap2-bin to grant Java the capability to bind privileged ports (< 1024) such as default $PORT=80 as an unprivileged user
+RUN apt-get update && apt-get install -y --no-install-recommends libcap2-bin && \
+    setcap 'cap_net_bind_service=+ep' $(readlink -f $(which java)) && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create dedicated non-root application user and group, pre-create required upload storage directories, and set /app ownership
+RUN groupadd -r aerosentinel && useradd -r -g aerosentinel -d /app -s /sbin/nologin aerosentinel && \
+    mkdir -p /app/uploads/citizen-reports && \
+    chown -R aerosentinel:aerosentinel /app
 
 # Copy packaged fat JAR from build stage
 COPY --from=build --chown=aerosentinel:aerosentinel /app/target/aerosentinel-backend-1.0.0.jar app.jar
@@ -35,8 +42,8 @@ COPY --from=build --chown=aerosentinel:aerosentinel /app/target/aerosentinel-bac
 # Switch to unprivileged user
 USER aerosentinel
 
-# Expose container port (defaults to 8080)
-EXPOSE 8080
+# Expose container ports (Vercel container runtime maps $PORT dynamically, defaulting to 8080 or 80)
+EXPOSE 8080 80
 
 # Environment defaults for production
 ENV SPRING_PROFILES_ACTIVE=prod \

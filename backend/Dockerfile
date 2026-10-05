@@ -26,8 +26,10 @@ RUN ./mvnw clean package -DskipTests -B
 FROM eclipse-temurin:21-jre-jammy AS runtime
 WORKDIR /app
 
-# Create a dedicated non-root application user and group for security
-RUN groupadd -r aerosentinel && useradd -r -g aerosentinel -d /app -s /sbin/nologin aerosentinel
+# Create a dedicated non-root application user and group, pre-create required upload storage directories, and set /app ownership
+RUN groupadd -r aerosentinel && useradd -r -g aerosentinel -d /app -s /sbin/nologin aerosentinel && \
+    mkdir -p /app/uploads/citizen-reports && \
+    chown -R aerosentinel:aerosentinel /app
 
 # Copy the packaged Spring Boot JAR from the build stage
 COPY --from=build --chown=aerosentinel:aerosentinel /app/target/aerosentinel-backend-1.0.0.jar app.jar
