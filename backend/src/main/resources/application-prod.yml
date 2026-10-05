@@ -9,6 +9,11 @@ spring:
       ddl-auto: none
     show-sql: false
 
+app:
+  weather:
+    backfill:
+      enabled: false
+
 logging:
   level:
     com.aerosentinel: INFO

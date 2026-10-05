@@ -45,5 +45,5 @@ EXPOSE 8080
 ENV SPRING_PROFILES_ACTIVE=prod \
     JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
 
-# Launch Spring Boot; respects Render-assigned $PORT dynamically via application.yml server.port: ${PORT:8080}
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -Dserver.address=0.0.0.0 -jar app.jar"]
+# Launch Spring Boot; respects assigned $PORT dynamically, normalizes PostgreSQL URLs to JDBC, and runs with exec
+ENTRYPOINT ["sh", "-c", "case \"$DATABASE_URL\" in postgres://*) export DATABASE_URL=\"jdbc:postgresql://${DATABASE_URL#postgres://}\" ;; postgresql://*) export DATABASE_URL=\"jdbc:postgresql://${DATABASE_URL#postgresql://}\" ;; esac && exec java $JAVA_OPTS -Dserver.address=0.0.0.0 -jar app.jar"]
