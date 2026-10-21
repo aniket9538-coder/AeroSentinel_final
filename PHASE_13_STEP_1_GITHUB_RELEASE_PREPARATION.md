@@ -6,7 +6,8 @@
 **Release Preparation Gate:** **PASS**  
 **Target Repository:** `https://github.com/aniket9538-coder/AeroSentinel_final.git`  
 **Candidate Branch:** `release/phase13-candidate`  
-**Verified Remote Commit Hash:** `c8e37989dea101f3357cb8fd99d3a7ce3b8308b7`  
+**Candidate Release Commit:** `c8e37989dea101f3357cb8fd99d3a7ce3b8308b7`  
+**Verified Remote HEAD Commit:** `68cfff1ea8e4bd23f373256a9135bc1210b2cfe8`  
 
 ---
 
