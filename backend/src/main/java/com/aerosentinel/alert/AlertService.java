@@ -218,6 +218,11 @@ public class AlertService {
      */
     @Transactional
     public Alert acknowledgeAlert(UUID alertId, UUID acknowledgedBy) {
+        return acknowledgeAlert(alertId, acknowledgedBy, null);
+    }
+
+    @Transactional
+    public Alert acknowledgeAlert(UUID alertId, UUID acknowledgedBy, String actorName) {
         Alert alert = alertRepository.findById(alertId)
                 .orElseThrow(() -> new ResourceNotFoundException("Alert not found with id: " + alertId));
 
@@ -225,21 +230,46 @@ public class AlertService {
             throw new ValidationException("Cannot acknowledge an already resolved alert: " + alertId);
         }
 
+        if ("DISMISSED".equalsIgnoreCase(alert.getStatus())) {
+            throw new ValidationException("Cannot acknowledge a dismissed alert: " + alertId);
+        }
+
         if ("ACKNOWLEDGED".equalsIgnoreCase(alert.getStatus())) {
             return alert; // Idempotent
         }
+
+        String prevStatus = alert.getStatus() != null ? alert.getStatus().trim().toUpperCase() : "OPEN";
+        AlertStatus.validateTransition(prevStatus, "ACKNOWLEDGED");
 
         alert.setStatus("ACKNOWLEDGED");
         alert.setAcknowledgedAt(Instant.now());
         alert.setAcknowledgedBy(acknowledgedBy);
         alert.setUpdatedAt(Instant.now());
 
-        log.info("Alert id={} transitioned to ACKNOWLEDGED", alertId);
+        String actor = (actorName != null && !actorName.isBlank())
+                ? actorName
+                : (acknowledgedBy != null ? acknowledgedBy.toString() : "Municipal Authority");
+
+        // Record audit trail in authority_actions
+        if (actionRepository != null) {
+            com.aerosentinel.action.AuthorityAction action = new com.aerosentinel.action.AuthorityAction(
+                    alert.getId(),
+                    "ACKNOWLEDGEMENT",
+                    "Alert candidate acknowledged by municipal authority",
+                    actor,
+                    prevStatus,
+                    "ACKNOWLEDGED",
+                    "Triage candidate accepted for operational response"
+            );
+            actionRepository.save(action);
+        }
+
+        log.info("Alert id={} transitioned from {} to ACKNOWLEDGED by {}", alertId, prevStatus, actor);
         return alertRepository.save(alert);
     }
 
     public Optional<Alert> acknowledgeAlert(UUID alertId) {
-        return Optional.of(acknowledgeAlert(alertId, null));
+        return Optional.of(acknowledgeAlert(alertId, null, null));
     }
 
     /**
@@ -247,11 +277,16 @@ public class AlertService {
      */
     @Transactional
     public Alert resolveAlert(UUID alertId, UUID resolvedBy) {
-        return resolveAlert(alertId, resolvedBy, "Alert and Event resolved by municipal authority", false);
+        return resolveAlert(alertId, resolvedBy, "Alert and Event resolved by municipal authority", false, null);
     }
 
     @Transactional
     public Alert resolveAlert(UUID alertId, UUID resolvedBy, String notes, boolean strictValidation) {
+        return resolveAlert(alertId, resolvedBy, notes, strictValidation, null);
+    }
+
+    @Transactional
+    public Alert resolveAlert(UUID alertId, UUID resolvedBy, String notes, boolean strictValidation, String actorName) {
         Alert alert = alertRepository.findById(alertId)
                 .orElseThrow(() -> new ResourceNotFoundException("Alert not found with id: " + alertId));
 
@@ -259,8 +294,25 @@ public class AlertService {
             return alert; // Idempotent
         }
 
+        if ("DISMISSED".equalsIgnoreCase(alert.getStatus())) {
+            throw new IllegalStateException("Cannot resolve a DISMISSED alert: " + alertId);
+        }
+
         if (strictValidation && (notes == null || notes.isBlank())) {
             throw new com.aerosentinel.exception.ValidationException("Resolution notes are required to resolve alert");
+        }
+
+        String curAlertStatus = alert.getStatus() != null ? alert.getStatus().trim().toUpperCase() : "OPEN";
+        if (strictValidation) {
+            if ("OPEN".equals(curAlertStatus) || "ACKNOWLEDGED".equals(curAlertStatus)) {
+                throw new IllegalStateException("Cannot resolve alert directly from " + curAlertStatus + " state. Field inspection and action taken are required first.");
+            }
+            if ("ASSIGNED".equals(curAlertStatus)) {
+                throw new IllegalStateException("Cannot resolve alert while in ASSIGNED state. Inspection and action taken are required first.");
+            }
+            if ("IN_INSPECTION".equals(curAlertStatus)) {
+                throw new IllegalStateException("Cannot resolve alert while in IN_INSPECTION state. Action must be recorded first.");
+            }
         }
 
         // Synchronize parent event status: ACTION_TAKEN -> RESOLVED
@@ -294,18 +346,25 @@ public class AlertService {
         alert.setResolvedBy(resolvedBy);
         alert.setUpdatedAt(Instant.now());
 
+        String actor = (actorName != null && !actorName.isBlank())
+                ? actorName
+                : (resolvedBy != null ? resolvedBy.toString() : "Municipal Authority");
+
         // Audit record in authority_actions
         if (actionRepository != null) {
             com.aerosentinel.action.AuthorityAction action = new com.aerosentinel.action.AuthorityAction(
                     alert.getId(),
                     "RESOLUTION",
                     (notes != null && !notes.isBlank()) ? notes.trim() : "Alert resolved by municipal authority",
-                    (resolvedBy != null) ? resolvedBy.toString() : "Municipal Authority"
+                    actor,
+                    curAlertStatus,
+                    "RESOLVED",
+                    (notes != null && !notes.isBlank()) ? notes.trim() : "Case resolved"
             );
             actionRepository.save(action);
         }
 
-        log.info("Alert id={} transitioned to RESOLVED", alertId);
+        log.info("Alert id={} transitioned from {} to RESOLVED by {}", alertId, curAlertStatus, actor);
         return alertRepository.save(alert);
     }
 
@@ -314,6 +373,11 @@ public class AlertService {
      */
     @Transactional
     public Alert dismissAlert(UUID alertId, UUID dismissedBy, String reason) {
+        return dismissAlert(alertId, dismissedBy, reason, null);
+    }
+
+    @Transactional
+    public Alert dismissAlert(UUID alertId, UUID dismissedBy, String reason, String actorName) {
         if (alertId == null) {
             throw new IllegalArgumentException("Alert ID must not be null");
         }
@@ -329,6 +393,11 @@ public class AlertService {
         }
         if ("RESOLVED".equalsIgnoreCase(alert.getStatus())) {
             throw new IllegalStateException("Cannot dismiss an already RESOLVED alert: " + alertId);
+        }
+
+        String curAlertStatus = alert.getStatus() != null ? alert.getStatus().trim().toUpperCase() : "OPEN";
+        if ("IN_INSPECTION".equals(curAlertStatus) || "ACTION_TAKEN".equals(curAlertStatus)) {
+            throw new IllegalStateException("Cannot dismiss alert after inspection has started. Current status: " + curAlertStatus);
         }
 
         // Synchronize parent event status: OPEN -> DISMISSED
@@ -354,18 +423,25 @@ public class AlertService {
         alert.setResolvedBy(dismissedBy);
         alert.setUpdatedAt(Instant.now());
 
+        String actor = (actorName != null && !actorName.isBlank())
+                ? actorName
+                : (dismissedBy != null ? dismissedBy.toString() : "Municipal Authority");
+
         // Audit record in authority_actions
         if (actionRepository != null) {
             com.aerosentinel.action.AuthorityAction action = new com.aerosentinel.action.AuthorityAction(
                     alert.getId(),
                     "DISMISSAL",
                     reason.trim(),
-                    (dismissedBy != null) ? dismissedBy.toString() : "Municipal Authority"
+                    actor,
+                    curAlertStatus,
+                    "DISMISSED",
+                    reason.trim()
             );
             actionRepository.save(action);
         }
 
-        log.info("Alert id={} transitioned to DISMISSED", alertId);
+        log.info("Alert id={} transitioned from {} to DISMISSED by {}", alertId, curAlertStatus, actor);
         return alertRepository.save(alert);
     }
 

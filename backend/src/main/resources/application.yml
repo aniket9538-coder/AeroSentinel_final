@@ -69,6 +69,15 @@ app:
         timeout-ms: ${OPEN_METEO_TIMEOUT_MS:15000}
       base-url: ${WEATHER_BASE_URL:https://api.openweathermap.org/data/2.5}
       api-key: ${WEATHER_API_KEY:}
+    warnings:
+      official:
+        base-url: ${OFFICIAL_WARNINGS_BASE_URL:https://sachet.ndma.gov.in/cap_public_website/rss/rss_india.xml}
+        timeout-ms: ${OFFICIAL_WARNINGS_TIMEOUT_MS:5000}
+  assistant:
+    timeout-ms: ${ASSISTANT_TIMEOUT_MS:10000}
+    rate-limit:
+      requests-per-minute: ${ASSISTANT_RATE_LIMIT_RPM:30}
+      trusted-proxies: ${ASSISTANT_RATE_LIMIT_TRUSTED_PROXIES:}
   weather:
     ingestion:
       enabled: ${AEROSENTINEL_WEATHER_INGESTION_ENABLED:true}

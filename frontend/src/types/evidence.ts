@@ -201,3 +201,58 @@ export interface EvidenceSummaryResponse {
   provenance: EvidenceProvenance;
   status: string;
 }
+
+export type EvidenceClass =
+  | 'CITIZEN_SUBMITTED'
+  | 'CITIZEN_VISION'
+  | 'ENVIRONMENTAL_MEASUREMENT'
+  | 'WEATHER_MODEL_CONTEXT'
+  | 'OFFICIAL_WARNING'
+  | 'EXPERIMENTAL_ML_OUTPUT';
+
+export interface NormalizedEvidenceItem {
+  evidenceId: string;
+  evidenceClass: EvidenceClass;
+  sourceType: string;
+  sourceId?: string | null;
+  eventTimestamp?: string | null;
+  observedTimestamp?: string | null;
+  h3Index: string;
+  measurementValue?: number | null;
+  measurementUnit?: string | null;
+  freshnessStatus: string;
+  qualityStatus: string;
+  isIndependent: boolean;
+  clusterGroupId?: string | null;
+  metadata?: Record<string, any> | null;
+}
+
+export interface ExcludedEvidenceDto {
+  evidenceId: string;
+  source: string;
+  reasonCode: string;
+  description: string;
+}
+
+export interface TriageCandidateDto {
+  candidateId: string;
+  h3Index: string;
+  cityId?: string | null;
+  cityName?: string | null;
+  category: string;
+  triageStatus: 'PROVISIONAL_TRIAGE' | 'ALERT_CANDIDATE' | 'MONITOR' | 'INSUFFICIENT_EVIDENCE' | string;
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | string;
+  evidenceScore: number;
+  riskScore?: number | null;
+  visualConfidence?: number | null;
+  independentSourceCount: number;
+  relatedSourceCount: number;
+  isProvisional: boolean;
+  contributingEvidence: NormalizedEvidenceItem[];
+  excludedEvidence: ExcludedEvidenceDto[];
+  explanations: string[];
+  sourceIndependenceBreakdown: Record<string, string>;
+  policyVersion: string;
+  createdAt: string;
+}
+

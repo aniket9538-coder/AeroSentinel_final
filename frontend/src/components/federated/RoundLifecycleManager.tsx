@@ -5,7 +5,8 @@ import { Button } from '../common/Button';
 import { RoundDetail, RoundResponse } from '../../types/federated';
 import { getRoundStatusConfig, formatRelativeTime, formatMetric } from '../../utils/federatedUtils';
 import { RoundQuorumProgress } from './RoundQuorumProgress';
-import { RefreshCw, Play, CheckCircle, AlertTriangle, Layers, Clock, Cpu } from 'lucide-react';
+import { RefreshCw, Play, CheckCircle, AlertTriangle, Layers, Clock, Cpu, BarChart3, ChevronDown, ChevronUp, ShieldCheck } from 'lucide-react';
+import { federatedService } from '../../services/federated.service';
 
 interface RoundLifecycleManagerProps {
   rounds: RoundResponse[];
@@ -14,6 +15,7 @@ interface RoundLifecycleManagerProps {
   onSelectRound: (roundId: string) => void;
   onInitiateRoundClick: () => void;
   onTriggerAggregation: (roundId: string) => Promise<void>;
+  onSimulateRound?: (roundId: string) => Promise<void>;
 }
 
 export const RoundLifecycleManager: React.FC<RoundLifecycleManagerProps> = ({
@@ -23,8 +25,13 @@ export const RoundLifecycleManager: React.FC<RoundLifecycleManagerProps> = ({
   onSelectRound,
   onInitiateRoundClick,
   onTriggerAggregation,
+  onSimulateRound,
 }) => {
   const [isAggregating, setIsAggregating] = useState(false);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [showEvaluation, setShowEvaluation] = useState(false);
+  const [evaluationData, setEvaluationData] = useState<any>(null);
+  const [loadingEvaluation, setLoadingEvaluation] = useState(false);
 
   const activeRound = selectedRoundDetail || (rounds.length > 0 ? (rounds[0] as any) : null);
   const statusCfg = getRoundStatusConfig(activeRound?.status);
@@ -42,6 +49,31 @@ export const RoundLifecycleManager: React.FC<RoundLifecycleManagerProps> = ({
       await onTriggerAggregation(activeRound.roundId);
     } finally {
       setIsAggregating(false);
+    }
+  };
+
+  const handleSimulate = async () => {
+    if (!activeRound || isSimulating || !onSimulateRound) return;
+    setIsSimulating(true);
+    try {
+      await onSimulateRound(activeRound.roundId);
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  const handleLoadEvaluation = async () => {
+    if (!activeRound) return;
+    const version = activeRound.targetModelVersion || activeRound.baseModelVersion || 'global-v2';
+    setLoadingEvaluation(true);
+    try {
+      const data = await federatedService.getEvaluation(version);
+      setEvaluationData(data);
+      setShowEvaluation(true);
+    } catch (e: any) {
+      console.error('Failed to load evaluation:', e);
+    } finally {
+      setLoadingEvaluation(false);
     }
   };
 
@@ -93,6 +125,22 @@ export const RoundLifecycleManager: React.FC<RoundLifecycleManagerProps> = ({
             <Play size={13} style={{ marginRight: '0.35rem' }} />
             New Round
           </Button>
+
+          {activeRound &&
+            activeRound.status !== 'COMPLETED' &&
+            activeRound.status !== 'FAILED' &&
+            onSimulateRound && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleSimulate}
+                isLoading={isSimulating}
+                title="Executes genuine local Ridge training on local datasets for participating nodes and submits updates"
+              >
+                <Cpu size={13} style={{ marginRight: '0.35rem' }} />
+                Simulate Node Training
+              </Button>
+            )}
 
           <Button
             variant="primary"
@@ -149,6 +197,12 @@ export const RoundLifecycleManager: React.FC<RoundLifecycleManagerProps> = ({
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                 <Clock size={13} />
                 Started: {formatRelativeTime(activeRound.createdAt)}
+              </span>
+            </div>
+
+            <div style={{ marginTop: '0.4rem', fontSize: '0.72rem', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <span style={{ fontFamily: 'monospace', background: 'rgba(255,255,255,0.05)', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
+                FedAvg Ridge (37 params: 36 f3-features-v1 weights + intercept, α=1.0)
               </span>
             </div>
           </div>
@@ -292,6 +346,117 @@ export const RoundLifecycleManager: React.FC<RoundLifecycleManagerProps> = ({
                 <span>ROC-AUC: <strong style={{ color: '#38bdf8' }}>{formatMetric(activeRound.aggregatedMetrics.rocAuc)}</strong></span>
                 <span>Brier: <strong style={{ color: '#10b981' }}>{formatMetric(activeRound.aggregatedMetrics.brierScore)}</strong></span>
               </div>
+            </div>
+          )}
+
+          {/* Held-Out Cross-City Baseline Evaluation Toggle & Panel */}
+          {activeRound.status === 'COMPLETED' && (
+            <div style={{ marginTop: '0.75rem', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '8px', overflow: 'hidden' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '0.75rem 1rem',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  cursor: 'pointer',
+                }}
+                onClick={() => {
+                  if (!showEvaluation && !evaluationData) {
+                    handleLoadEvaluation();
+                  } else {
+                    setShowEvaluation(!showEvaluation);
+                  }
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', fontWeight: 600, color: '#38bdf8' }}>
+                  <BarChart3 size={16} />
+                  <span>Held-Out Cross-City Evaluation & Baseline Comparison</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {loadingEvaluation && <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>Loading metrics...</span>}
+                  <Button variant="ghost" size="sm" style={{ padding: '0.2rem' }}>
+                    {showEvaluation ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  </Button>
+                </div>
+              </div>
+
+              {showEvaluation && evaluationData && (
+                <div style={{ padding: '1rem', background: 'rgba(0, 0, 0, 0.2)', borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <span style={{ fontSize: '0.8rem', color: '#9ca3af' }}>
+                      Master Held-Out Validation: <strong style={{ color: '#f3f4f6' }}>{evaluationData.testSampleCount || evaluationData.testSampleSize} samples</strong> (cross-city test split, seed 999)
+                    </span>
+                    <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
+                      Evaluated: {formatRelativeTime(evaluationData.evaluatedAt || evaluationData.evaluationTimestamp)}
+                    </span>
+                  </div>
+
+                  <div style={{ overflowX: 'auto', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', textAlign: 'left' }}>
+                      <thead>
+                        <tr style={{ background: 'rgba(255, 255, 255, 0.04)', color: '#9ca3af' }}>
+                          <th style={{ padding: '0.5rem 0.8rem' }}>Model / Baseline</th>
+                          <th style={{ padding: '0.5rem 0.8rem' }}>MAE (µg/m³)</th>
+                          <th style={{ padding: '0.5rem 0.8rem' }}>RMSE</th>
+                          <th style={{ padding: '0.5rem 0.8rem' }}>ROC-AUC</th>
+                          <th style={{ padding: '0.5rem 0.8rem' }}>Brier Score</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)', background: 'rgba(56, 189, 248, 0.05)' }}>
+                          <td style={{ padding: '0.5rem 0.8rem', fontWeight: 600, color: '#38bdf8' }}>
+                            Consensus Global Model ({evaluationData.modelVersion})
+                          </td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#f3f4f6' }}>{formatMetric(evaluationData.globalMetrics?.mae)}</td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#f3f4f6' }}>{formatMetric(evaluationData.globalMetrics?.rmse)}</td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#10b981', fontWeight: 600 }}>{formatMetric(evaluationData.globalMetrics?.rocAuc)}</td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#f3f4f6' }}>{formatMetric(evaluationData.globalMetrics?.brierScore)}</td>
+                        </tr>
+                        <tr style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                          <td style={{ padding: '0.5rem 0.8rem', fontWeight: 500, color: '#e5e7eb' }}>
+                            Pune Local Baseline (Local Only)
+                          </td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#9ca3af' }}>{formatMetric((evaluationData.localBaselineMetrics || evaluationData.puneLocalMetrics)?.mae)}</td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#9ca3af' }}>{formatMetric((evaluationData.localBaselineMetrics || evaluationData.puneLocalMetrics)?.rmse)}</td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#9ca3af' }}>{formatMetric((evaluationData.localBaselineMetrics || evaluationData.puneLocalMetrics)?.rocAuc)}</td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#9ca3af' }}>{formatMetric((evaluationData.localBaselineMetrics || evaluationData.puneLocalMetrics)?.brierScore)}</td>
+                        </tr>
+                        <tr style={{ borderTop: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                          <td style={{ padding: '0.5rem 0.8rem', fontWeight: 500, color: '#9ca3af' }}>
+                            Naive Mean Baseline (Constant)
+                          </td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#6b7280' }}>{formatMetric(evaluationData.naiveBaselineMetrics?.mae)}</td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#6b7280' }}>{formatMetric(evaluationData.naiveBaselineMetrics?.rmse)}</td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#6b7280' }}>{formatMetric(evaluationData.naiveBaselineMetrics?.rocAuc)}</td>
+                          <td style={{ padding: '0.5rem 0.8rem', color: '#6b7280' }}>{formatMetric(evaluationData.naiveBaselineMetrics?.brierScore)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: '0.75rem',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '0.5rem',
+                      padding: '0.6rem 0.8rem',
+                      borderRadius: '6px',
+                      background: 'rgba(245, 158, 11, 0.08)',
+                      border: '1px solid rgba(245, 158, 11, 0.25)',
+                      color: '#fbbf24',
+                      fontSize: '0.75rem',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    <ShieldCheck size={16} style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                    <span>
+                      <strong>Scientific Domain Limitation:</strong> {evaluationData.geographicValidityNotice || evaluationData.domainLimitationNote}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -11,11 +11,13 @@ export function useAuthorityQueue(options: UseAuthorityQueueOptions = {}) {
   const [items, setItems] = useState<AuthorityQueueItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [isUnauthorized, setIsUnauthorized] = useState<boolean>(false);
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setIsUnauthorized(false);
     try {
       const data = await alertApi.getAuthorityQueue({
         cityId: options.cityId,
@@ -26,6 +28,11 @@ export function useAuthorityQueue(options: UseAuthorityQueueOptions = {}) {
         setSelectedAlertId(data[0].alertId);
       }
     } catch (err: any) {
+      const isAuthErr =
+        err?.response?.status === 401 ||
+        err?.response?.data?.status === 401 ||
+        (err?.response?.data?.message || '').toLowerCase().includes('authentication required');
+      setIsUnauthorized(isAuthErr);
       setError(err?.response?.data?.message || err?.message || 'Unable to load authority alerts.');
     } finally {
       setLoading(false);
@@ -66,6 +73,7 @@ export function useAuthorityQueue(options: UseAuthorityQueueOptions = {}) {
     items,
     loading,
     error,
+    isUnauthorized,
     selectedAlert,
     selectedAlertId,
     setSelectedAlertId,

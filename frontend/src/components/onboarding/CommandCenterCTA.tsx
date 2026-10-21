@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Compass } from 'lucide-react';
 
 export const CommandCenterCTA: React.FC = () => {
   const navigate = useNavigate();
@@ -38,14 +38,40 @@ export const CommandCenterCTA: React.FC = () => {
             Join municipal authorities, atmospheric researchers, and citizens in building proactive climate resilience.
           </p>
 
-          <button
-            className="onboarding-cta-btn"
-            onClick={() => navigate('/dashboard')}
-            type="button"
-          >
-            <span>Enter AeroSentinel Command Center</span>
-            <ArrowRight size={18} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+            <button
+              className="onboarding-cta-btn"
+              onClick={() => navigate('/dashboard')}
+              type="button"
+            >
+              <span>Enter AeroSentinel Command Center</span>
+              <ArrowRight size={18} />
+            </button>
+
+            <button
+              onClick={() => navigate('/citizen')}
+              type="button"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.85rem 1.5rem',
+                borderRadius: '12px',
+                background: 'rgba(255, 255, 255, 0.15)',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                color: '#ffffff',
+                fontWeight: 700,
+                fontSize: '0.95rem',
+                cursor: 'pointer',
+                backdropFilter: 'blur(8px)',
+                transition: 'all 0.15s ease',
+              }}
+              id="cta-citizen-portal-btn"
+            >
+              <Compass size={18} />
+              <span>Explore Citizen Portal</span>
+            </button>
+          </div>
         </div>
       </div>
     </section>

@@ -21,4 +21,9 @@ public interface AirObservationRepository extends JpaRepository<AirObservation, 
     Optional<AirObservation> findFirstByH3IndexOrderByObservedAtDesc(String h3Index);
     List<AirObservation> findByH3IndexOrderByObservedAtAsc(String h3Index);
     List<AirObservation> findByCityIdAndObservedAt(UUID cityId, Instant observedAt);
+    Optional<AirObservation> findFirstByOrderByObservedAtDesc();
+    long countBySource(String source);
+    List<AirObservation> findTop100ByCityIdOrderByObservedAtDesc(UUID cityId);
+    List<AirObservation> findTop100ByStationIdOrderByObservedAtDesc(String stationId);
+    List<AirObservation> findByCityIdAndObservedAtBetweenOrderByObservedAtAsc(UUID cityId, Instant from, Instant to);
 }

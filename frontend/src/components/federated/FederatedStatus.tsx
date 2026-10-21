@@ -13,12 +13,12 @@ interface FederatedStatusProps {
 }
 
 export const FederatedStatus: React.FC<FederatedStatusProps> = ({
-  currentRound = 1,
-  totalNodes = 3,
-  activeNodes = 3,
+  currentRound = 0,
+  totalNodes = 0,
+  activeNodes = 0,
   status = 'SYNCHRONIZED',
-  activeModelVersion = 'global-v3',
-  totalSamples = 2400,
+  activeModelVersion = 'N/A',
+  totalSamples = 0,
 }) => {
   return (
     <Card

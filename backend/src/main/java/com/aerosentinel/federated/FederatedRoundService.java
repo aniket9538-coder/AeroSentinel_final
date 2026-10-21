@@ -10,6 +10,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -120,6 +125,24 @@ public class FederatedRoundService {
             throw new ValidationException("Sample count must be strictly greater than 0");
         }
 
+        // 4. Parameter weights validation (dimension & poisoning check)
+        if (updateDto.weights() != null && !updateDto.weights().isEmpty()) {
+            if (updateDto.weights().size() != 37) {
+                throw new ValidationException(String.format(
+                        "Parameter weights dimension mismatch: expected 37 parameters (36 features + intercept) for f3-features-v1, received %d",
+                        updateDto.weights().size()
+                ));
+            }
+            for (Double w : updateDto.weights()) {
+                if (w == null || !Double.isFinite(w)) {
+                    throw new ValidationException("Parameter weights must be finite numerical values (no NaN or Inf)");
+                }
+                if (Math.abs(w) > 100000.0) {
+                    throw new ValidationException("Parameter update exceeds allowable bounds (possible parameter poisoning): " + w);
+                }
+            }
+        }
+
         // Advance round lifecycle to UPDATES_COLLECTING
         if ("CREATED".equalsIgnoreCase(round.getStatus()) || "MODEL_DISTRIBUTED".equalsIgnoreCase(round.getStatus()) || "TRAINING".equalsIgnoreCase(round.getStatus())) {
             round.setStatus("UPDATES_COLLECTING");
@@ -193,7 +216,7 @@ public class FederatedRoundService {
         round.setStatus("AGGREGATING");
         roundRepository.save(round);
 
-        // Mathematical Sample-Weighted FedAvg Aggregation
+        // Mathematical Sample-Weighted FedAvg Aggregation over Metrics & Parameter Weights
         int totalSamples = 0;
         double weightedMaeSum = 0.0;
         double weightedRmseSqSum = 0.0;
@@ -201,6 +224,8 @@ public class FederatedRoundService {
         double weightedBrierSum = 0.0;
 
         List<String> participatingCities = new ArrayList<>();
+        double[] aggregatedWeights = new double[37];
+        boolean hasWeights = false;
 
         for (FederatedNodeUpdate u : updates) {
             int n = u.getSampleCount();
@@ -211,6 +236,24 @@ public class FederatedRoundService {
             if (u.getRmse() != null) weightedRmseSqSum += (u.getRmse() * u.getRmse()) * n;
             if (u.getRocAuc() != null) weightedRocAucSum += u.getRocAuc() * n;
             if (u.getBrierScore() != null) weightedBrierSum += u.getBrierScore() * n;
+
+            // Parameter coordinate aggregation
+            if (u.getWeightsJson() != null && !u.getWeightsJson().isBlank()) {
+                try {
+                    List<Double> nodeWeights = objectMapper.readValue(u.getWeightsJson(), new TypeReference<List<Double>>() {});
+                    if (nodeWeights != null && !nodeWeights.isEmpty()) {
+                        hasWeights = true;
+                        for (int i = 0; i < Math.min(37, nodeWeights.size()); i++) {
+                            Double val = nodeWeights.get(i);
+                            if (val != null && Double.isFinite(val)) {
+                                aggregatedWeights[i] += val * n;
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to parse weights for node update {}: {}", u.getCityName(), e.getMessage());
+                }
+            }
         }
 
         double aggMae = totalSamples > 0 ? weightedMaeSum / totalSamples : 0.0;
@@ -224,6 +267,21 @@ public class FederatedRoundService {
                 Math.round(aggRocAuc * 10000.0) / 10000.0,
                 Math.round(aggBrier * 10000.0) / 10000.0
         );
+
+        // Normalize aggregated weights
+        List<Double> finalAggregatedWeights = new ArrayList<>();
+        if (hasWeights && totalSamples > 0) {
+            for (int i = 0; i < 37; i++) {
+                finalAggregatedWeights.add(Math.round((aggregatedWeights[i] / totalSamples) * 10000.0) / 10000.0);
+            }
+        }
+
+        String aggregatedWeightsJson;
+        try {
+            aggregatedWeightsJson = objectMapper.writeValueAsString(finalAggregatedWeights);
+        } catch (Exception e) {
+            aggregatedWeightsJson = "[]";
+        }
 
         // Version increment: global-v1 -> global-v2 -> global-v3
         String baseVer = round.getBaseModelVersion();
@@ -251,7 +309,39 @@ public class FederatedRoundService {
             citiesJson = "[]";
         }
 
-        String artifactPath = "storage/models/global/" + nextVer + ".joblib";
+        String artifactPath = "storage/models/global/" + nextVer + ".json";
+
+        // Save serialized global consensus model artifact with SHA-256 integrity hash
+        try {
+            Path artifactDir = Paths.get("storage", "models", "global");
+            Files.createDirectories(artifactDir);
+            Path artifactFile = artifactDir.resolve(nextVer + ".json");
+
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(aggregatedWeightsJson.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hashBytes) sb.append(String.format("%02x", b));
+            String sha256Hex = sb.toString();
+
+            Map<String, Object> artifactMap = new LinkedHashMap<>();
+            artifactMap.put("version", nextVer);
+            artifactMap.put("baseModelVersion", baseVer);
+            artifactMap.put("roundId", roundId);
+            artifactMap.put("algorithm", "FED_AVG_RIDGE");
+            artifactMap.put("featureSchemaVersion", "f3-features-v1");
+            artifactMap.put("parameterCount", finalAggregatedWeights.size());
+            artifactMap.put("totalSamplesAggregated", totalSamples);
+            artifactMap.put("participatingNodes", participatingCities);
+            artifactMap.put("weights", finalAggregatedWeights);
+            artifactMap.put("metrics", aggMetrics);
+            artifactMap.put("sha256", sha256Hex);
+            artifactMap.put("createdAt", Instant.now().toString());
+
+            Files.writeString(artifactFile, objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(artifactMap), StandardCharsets.UTF_8);
+            log.info("FEDERATED_ARTIFACT_SAVED path={} sha256={}", artifactFile, sha256Hex);
+        } catch (Exception e) {
+            log.warn("Could not write physical model artifact file: {}", e.getMessage());
+        }
 
         FederatedGlobalModel newGlobal = new FederatedGlobalModel(
                 nextVer,
@@ -260,7 +350,7 @@ public class FederatedRoundService {
                 true,
                 totalSamples,
                 citiesJson,
-                "[]",
+                aggregatedWeightsJson,
                 aggMetrics.mae(),
                 aggMetrics.rmse(),
                 aggMetrics.rocAuc(),

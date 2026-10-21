@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Sun,
   Moon,
@@ -10,11 +10,16 @@ import {
   MapPin,
   ShieldCheck,
   RefreshCw,
+  Compass,
+  LogIn,
+  LogOut,
 } from 'lucide-react';
 import { useApp } from '../../store/AppContext';
+import { authService } from '../../services/auth.service';
 
 export const Navbar: React.FC = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const {
     theme,
     toggleTheme,
@@ -34,6 +39,28 @@ export const Navbar: React.FC = () => {
 
   const [cityDropdownOpen, setCityDropdownOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return typeof localStorage !== 'undefined' && !!localStorage.getItem('aerosentinel_jwt');
+  });
+
+  const handleToggleAuth = async () => {
+    if (isAuthenticated) {
+      authService.logout();
+      setIsAuthenticated(false);
+      setUserDropdownOpen(false);
+      window.location.reload();
+    } else {
+      try {
+        await authService.loginAsAuthority();
+        setIsAuthenticated(true);
+        setUserDropdownOpen(false);
+        window.location.reload();
+      } catch (e) {
+        console.error('Failed to authenticate:', e);
+      }
+    }
+  };
 
   // Derive page context title from route
   const getPageTitle = (path: string): string => {
@@ -488,36 +515,117 @@ export const Navbar: React.FC = () => {
           )}
         </div>
 
-        {/* User / Admin Status Badge */}
-        <div
+        {/* Switch to Citizen Portal */}
+        <button
+          onClick={() => navigate('/citizen')}
           style={{
             height: '36px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.45rem',
             padding: '0 0.75rem',
             borderRadius: '8px',
-            background: 'var(--bg-surface-elevated)',
-            border: '1px solid var(--border-medium)',
+            background: 'var(--brand-surface)',
+            border: '1px solid var(--brand-border)',
+            color: 'var(--brand-primary)',
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            transition: 'all 0.15s ease',
           }}
+          title="Open Citizen Portal"
+          id="navbar-citizen-portal-btn"
         >
-          <div
+          <Compass size={14} />
+          <span>Citizen Portal</span>
+        </button>
+
+        {/* User / Admin Status Badge */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setUserDropdownOpen(!userDropdownOpen)}
             style={{
-              width: '22px',
-              height: '22px',
-              borderRadius: '5px',
-              background: 'linear-gradient(135deg, var(--brand-primary), var(--accent-blue))',
+              height: '36px',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              color: '#ffffff',
+              gap: '0.45rem',
+              padding: '0 0.75rem',
+              borderRadius: '8px',
+              background: 'var(--bg-surface-elevated)',
+              border: `1px solid ${isAuthenticated ? 'var(--brand-primary)' : 'var(--border-medium)'}`,
+              cursor: 'pointer',
+              color: 'var(--text-primary)',
             }}
+            title={isAuthenticated ? 'Authority officer session active' : 'Click to sign in as Municipal Authority Officer'}
+            id="navbar-auth-status-btn"
           >
-            <ShieldCheck size={13} />
-          </div>
-          <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-            Admin
-          </span>
+            <div
+              style={{
+                width: '22px',
+                height: '22px',
+                borderRadius: '5px',
+                background: isAuthenticated
+                  ? 'linear-gradient(135deg, var(--brand-primary), var(--accent-blue))'
+                  : '#6b7280',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#ffffff',
+              }}
+            >
+              <ShieldCheck size={13} />
+            </div>
+            <span style={{ fontSize: '0.78rem', fontWeight: 600 }}>
+              {isAuthenticated ? 'Authority (Active)' : 'Sign In (Authority)'}
+            </span>
+          </button>
+
+          {userDropdownOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 8px)',
+                right: 0,
+                width: '240px',
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-medium)',
+                borderRadius: '10px',
+                boxShadow: 'var(--shadow-lg)',
+                padding: '0.75rem',
+                zIndex: 200,
+              }}
+            >
+              <div style={{ marginBottom: '0.6rem', paddingBottom: '0.4rem', borderBottom: '1px solid var(--border-subtle)' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {isAuthenticated ? 'Authority Officer Session' : 'Unauthenticated Session'}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                  {isAuthenticated ? 'authority@aerosentinel.gov' : 'Public read-only session'}
+                </div>
+              </div>
+              <button
+                onClick={handleToggleAuth}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  padding: '0.45rem 0.75rem',
+                  borderRadius: '6px',
+                  background: isAuthenticated ? '#fee2e2' : '#0284c7',
+                  color: isAuthenticated ? '#dc2626' : '#ffffff',
+                  border: 'none',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  justifyContent: 'center',
+                }}
+              >
+                {isAuthenticated ? <LogOut size={14} /> : <LogIn size={14} />}
+                <span>{isAuthenticated ? 'Sign Out of Authority' : 'Sign In as Authority Officer'}</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>

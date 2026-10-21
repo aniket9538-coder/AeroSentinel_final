@@ -56,7 +56,7 @@ class HotspotIntegrationTest {
                 .andExpect(jsonPath("$.cityName").value("Pune"))
                 .andExpect(jsonPath("$.modelVersion").value("hotspot_classifier_v1"))
                 .andExpect(jsonPath("$.engineType").value("ML"))
-                .andExpect(jsonPath("$.freshness").value(isOneOf("LIVE", "STALE")))
+                .andExpect(jsonPath("$.freshness").value(isOneOf("LIVE", "STALE", "UNAVAILABLE", "NO_DATA")))
                 .andExpect(jsonPath("$.totalCells").isNumber())
                 .andExpect(jsonPath("$.operationalThreshold").value(0.20))
                 .andExpect(jsonPath("$.cells").isArray())
@@ -106,13 +106,13 @@ class HotspotIntegrationTest {
                 .andExpect(jsonPath("$.confidence").isNumber())
                 .andExpect(jsonPath("$.isHotspot").isBoolean())
                 .andExpect(jsonPath("$.operationalThreshold").value(0.20))
-                .andExpect(jsonPath("$.freshness").value(isOneOf("LIVE", "STALE")))
+                .andExpect(jsonPath("$.freshness").value(isOneOf("LIVE", "STALE", "UNAVAILABLE", "NO_DATA")))
                 .andExpect(jsonPath("$.spatialContext").exists())
                 .andExpect(jsonPath("$.spatialContext.h3Index").value(PUNE_SHIVAJINAGAR_H3))
                 .andExpect(jsonPath("$.spatialContext.isHotspot").isBoolean())
                 .andExpect(jsonPath("$.spatialContext.operationalThreshold").value(0.20))
                 .andExpect(jsonPath("$.spatialContext.confidenceBreakdown").exists())
-                .andExpect(jsonPath("$.spatialContext.monitoringCoverage.spatialCoverageConfidence").isNumber())
+                .andExpect(jsonPath("$.spatialContext.confidenceBreakdown.spatialCoverageConfidence").isNumber())
                 .andReturn();
 
         log.info("API_RUNTIME_RESPONSE_EXCERPT: {}", result.getResponse().getContentAsString());

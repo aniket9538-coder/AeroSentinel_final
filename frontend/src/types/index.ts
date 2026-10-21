@@ -122,6 +122,7 @@ export interface CitizenReport {
   description: string;
   imageUrl?: string;
   photoUrl?: string;
+  photoUrls?: string[];
   storageKey?: string;
   submittedAt: string;
   observedAt?: string;
@@ -168,7 +169,7 @@ export interface Alert {
   severity: AlertSeverity;
   title: string;
   message: string;
-  status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'DISMISSED';
+  status: 'OPEN' | 'ACKNOWLEDGED' | 'ASSIGNED' | 'IN_INSPECTION' | 'ACTION_TAKEN' | 'RESOLVED' | 'CLOSED' | 'DISMISSED';
   createdAt: string;
   acknowledgedAt?: string;
 }
@@ -222,3 +223,7 @@ export * from './inspection';
 
 // Canonical F7 Event Context Types
 export * from './event';
+
+// Canonical Phase 4 Assistant Types
+export * from './assistant';
+

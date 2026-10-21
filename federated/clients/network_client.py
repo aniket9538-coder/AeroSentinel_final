@@ -57,12 +57,16 @@ class FederatedNetworkClient:
         timeout: float = 10.0,
         max_retries: int = 3,
         backoff_factor: float = 0.3,
+        auth_token: Optional[str] = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.auth_token = auth_token
 
         # Session with connection pooling and transient retry logic
         self.session = requests.Session()
+        if auth_token:
+            self.session.headers["Authorization"] = f"Bearer {auth_token}"
         retries = Retry(
             total=max_retries,
             backoff_factor=backoff_factor,
@@ -72,6 +76,25 @@ class FederatedNetworkClient:
         adapter = HTTPAdapter(max_retries=retries)
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
+
+    def login(
+        self,
+        email: str = "admin@aerosentinel.gov",
+        password: str = "password",
+    ) -> str:
+        """
+        Authenticates with Spring Boot auth service and configures Authorization Bearer header.
+        """
+        url = self._url("/api/v1/auth/login")
+        payload = {"email": email, "password": password}
+        res = self.session.post(url, json=payload, timeout=self.timeout)
+        data = self._handle_response(res)
+        token = data.get("token")
+        if token:
+            self.auth_token = token
+            self.session.headers["Authorization"] = f"Bearer {token}"
+            return token
+        raise FederatedNetworkError("Login succeeded but no token was returned", response_body=data)
 
     def _url(self, path: str) -> str:
         """Constructs absolute URL from endpoint path."""
@@ -260,18 +283,23 @@ class FederatedNetworkClient:
         metrics: Dict[str, float],
         weights: Optional[List[float]] = None,
         artifact_reference: Optional[str] = None,
+        intercept: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Calls POST /api/v1/federated/rounds/{roundId}/updates to transmit local model updates.
+        Ensures canonical 37-weight dimension contract (36 features + intercept) is satisfied.
         """
         url = self._url(f"/api/v1/federated/rounds/{round_id.strip().upper()}/updates")
+        w_list = [float(w) for w in weights] if weights is not None else []
+        if len(w_list) == 36:
+            w_list.append(float(intercept) if intercept is not None else 0.0)
         payload = {
             "nodeId": node_id.strip().upper(),
             "baseModelVersion": base_model_version,
             "localModelVersion": local_model_version,
             "sampleCount": sample_count,
             "metrics": metrics,
-            "weights": [float(w) for w in weights] if weights is not None else [],
+            "weights": w_list,
             "artifactReference": artifact_reference,
         }
         res = self.session.post(url, json=payload, timeout=self.timeout)

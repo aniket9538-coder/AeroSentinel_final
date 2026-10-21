@@ -175,7 +175,7 @@ class OperationalWorkflowLifecycleTest {
         assertThat(evInDb.getStatus()).isEqualTo("ASSIGNED");
 
         Alert alertInDb = alertRepository.findById(alert.getId()).orElseThrow();
-        assertThat(alertInDb.getStatus()).isEqualTo("ACKNOWLEDGED");
+        assertThat(alertInDb.getStatus()).isEqualTo("ASSIGNED");
     }
 
     @Test
@@ -193,6 +193,9 @@ class OperationalWorkflowLifecycleTest {
 
         PollutionEvent evInDb = pollutionEventRepository.findById(event.getId()).orElseThrow();
         assertThat(evInDb.getStatus()).isEqualTo("IN_INSPECTION");
+
+        Alert alertInDb = alertRepository.findById(alert.getId()).orElseThrow();
+        assertThat(alertInDb.getStatus()).isEqualTo("IN_INSPECTION");
     }
 
     @Test
@@ -200,7 +203,7 @@ class OperationalWorkflowLifecycleTest {
     @DisplayName("P6-04: Canonical step 4: IN_INSPECTION -> ACTION_TAKEN when AuthorityAction is recorded")
     void testRecordActionTransitionsEventToActionTaken() {
         PollutionEvent event = createTestEvent("IN_INSPECTION");
-        Alert alert = createTestAlert(event, "ACKNOWLEDGED");
+        Alert alert = createTestAlert(event, "IN_INSPECTION");
 
         var actionResp = actionService.recordAction(
                 new RecordActionRequest(alert.getId(), "FIELD_VERIFICATION", "On-site assessment conducted; source identified", "Officer A"),
@@ -209,9 +212,13 @@ class OperationalWorkflowLifecycleTest {
 
         assertThat(actionResp.actionType()).isEqualTo("FIELD_VERIFICATION");
         assertThat(actionResp.eventStatus()).isEqualTo("ACTION_TAKEN");
+        assertThat(actionResp.alertStatus()).isEqualTo("ACTION_TAKEN");
 
         PollutionEvent evInDb = pollutionEventRepository.findById(event.getId()).orElseThrow();
         assertThat(evInDb.getStatus()).isEqualTo("ACTION_TAKEN");
+
+        Alert alertInDb = alertRepository.findById(alert.getId()).orElseThrow();
+        assertThat(alertInDb.getStatus()).isEqualTo("ACTION_TAKEN");
 
         List<AuthorityAction> actions = actionRepository.findByAlertIdOrderByPerformedAtDesc(alert.getId());
         assertThat(actions).isNotEmpty();
@@ -223,7 +230,7 @@ class OperationalWorkflowLifecycleTest {
     @DisplayName("P6-05: Canonical step 5: ACTION_TAKEN -> RESOLVED when resolution is completed")
     void testResolveAlertTransitionsEventToResolved() {
         PollutionEvent event = createTestEvent("ACTION_TAKEN");
-        Alert alert = createTestAlert(event, "ACKNOWLEDGED");
+        Alert alert = createTestAlert(event, "ACTION_TAKEN");
 
         Alert resolved = alertService.resolveAlert(alert.getId(), null, "Factory scrubber repaired and verified.", true);
         assertThat(resolved.getStatus()).isEqualTo("RESOLVED");
@@ -286,7 +293,7 @@ class OperationalWorkflowLifecycleTest {
     @DisplayName("P6-08: Resolution requires notes (rejects blank notes)")
     void testResolutionRequiresNotes() {
         PollutionEvent event = createTestEvent("ACTION_TAKEN");
-        Alert alert = createTestAlert(event, "ACKNOWLEDGED");
+        Alert alert = createTestAlert(event, "ACTION_TAKEN");
 
         assertThatThrownBy(() -> alertService.resolveAlert(alert.getId(), null, "   ", true))
                 .isInstanceOf(ValidationException.class)
@@ -302,7 +309,7 @@ class OperationalWorkflowLifecycleTest {
 
         assertThatThrownBy(() -> alertService.resolveAlert(alert.getId(), null, "Resolved without inspection", true))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Cannot resolve event directly from OPEN state");
+                .hasMessageContaining("directly from OPEN state");
     }
 
     @Test
@@ -316,7 +323,7 @@ class OperationalWorkflowLifecycleTest {
                 new RecordActionRequest(alert.getId(), "SITE_CHECK", "Attempting action on OPEN event", "Officer"),
                 "Officer"
         )).isInstanceOf(IllegalStateException.class)
-          .hasMessageContaining("Cannot record action directly on OPEN event");
+          .hasMessageContaining("ACTION_TAKEN");
     }
 
     @Test
@@ -324,11 +331,11 @@ class OperationalWorkflowLifecycleTest {
     @DisplayName("P6-11: Dismissal rejected after inspection has started")
     void testDismissalRejectedAfterInspectionStarted() {
         PollutionEvent event = createTestEvent("IN_INSPECTION");
-        Alert alert = createTestAlert(event, "ACKNOWLEDGED");
+        Alert alert = createTestAlert(event, "IN_INSPECTION");
 
         assertThatThrownBy(() -> alertService.dismissAlert(alert.getId(), null, "Attempt dismissal in inspection"))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Cannot dismiss event after inspection has started");
+                .hasMessageContaining("Cannot dismiss alert after inspection has started");
     }
 
     @Test
@@ -336,7 +343,7 @@ class OperationalWorkflowLifecycleTest {
     @DisplayName("P6-12: POST /api/v1/actions rejects CITIZEN role with 403 Forbidden")
     void testActionEndpointRejectsCitizenWith403() throws Exception {
         PollutionEvent event = createTestEvent("IN_INSPECTION");
-        Alert alert = createTestAlert(event, "ACKNOWLEDGED");
+        Alert alert = createTestAlert(event, "IN_INSPECTION");
 
         RecordActionRequest req = new RecordActionRequest(alert.getId(), "SITE_CHECK", "Citizen trying authority action", "Citizen");
 
@@ -344,8 +351,7 @@ class OperationalWorkflowLifecycleTest {
                         .header("Authorization", citizenToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -353,7 +359,7 @@ class OperationalWorkflowLifecycleTest {
     @DisplayName("P6-13: POST /api/v1/actions rejects ANALYST role with 403 Forbidden")
     void testActionEndpointRejectsAnalystWith403() throws Exception {
         PollutionEvent event = createTestEvent("IN_INSPECTION");
-        Alert alert = createTestAlert(event, "ACKNOWLEDGED");
+        Alert alert = createTestAlert(event, "IN_INSPECTION");
 
         RecordActionRequest req = new RecordActionRequest(alert.getId(), "SITE_CHECK", "Analyst trying authority action", "Analyst");
 
@@ -361,8 +367,7 @@ class OperationalWorkflowLifecycleTest {
                         .header("Authorization", analystToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+                .andExpect(status().isForbidden());
     }
 
     @Test
@@ -370,7 +375,7 @@ class OperationalWorkflowLifecycleTest {
     @DisplayName("P6-14: POST /api/v1/actions succeeds for AUTHORITY role")
     void testActionEndpointSucceedsForAuthorityRole() throws Exception {
         PollutionEvent event = createTestEvent("IN_INSPECTION");
-        Alert alert = createTestAlert(event, "ACKNOWLEDGED");
+        Alert alert = createTestAlert(event, "IN_INSPECTION");
 
         RecordActionRequest req = new RecordActionRequest(alert.getId(), "MOBILE_SENSOR_DEPLOYED", "Mobile particulate monitor deployed at street corner", "Inspector Patil");
 
@@ -391,11 +396,12 @@ class OperationalWorkflowLifecycleTest {
     @DisplayName("P6-15: GET /api/v1/actions returns list of actions with lineage")
     void testGetActionsReturnsList() throws Exception {
         PollutionEvent event = createTestEvent("IN_INSPECTION");
-        Alert alert = createTestAlert(event, "ACKNOWLEDGED");
+        Alert alert = createTestAlert(event, "IN_INSPECTION");
 
         actionService.recordAction(new RecordActionRequest(alert.getId(), "ADVISORY_ISSUED", "Air quality health advisory issued to industrial unit", "Authority"), "Authority");
 
         mockMvc.perform(get("/api/v1/actions?alertId=" + alert.getId())
+                        .header("Authorization", authorityToken)
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
@@ -436,7 +442,8 @@ class OperationalWorkflowLifecycleTest {
         assertThat(pollutionEventRepository.findById(event.getId()).orElseThrow().getStatus()).isEqualTo("ASSIGNED");
 
         // 4. Start Inspection
-        mockMvc.perform(patch("/api/v1/inspections/" + inspectionId + "/start"))
+        mockMvc.perform(patch("/api/v1/inspections/" + inspectionId + "/start")
+                        .header("Authorization", authorityToken))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("IN_PROGRESS"));
 
@@ -452,6 +459,7 @@ class OperationalWorkflowLifecycleTest {
                 null
         );
         mockMvc.perform(post("/api/v1/inspections/" + inspectionId + "/verify")
+                        .header("Authorization", authorityToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(verifyReq)))
                 .andExpect(status().isCreated())

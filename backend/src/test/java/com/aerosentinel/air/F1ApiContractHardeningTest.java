@@ -109,9 +109,9 @@ class F1ApiContractHardeningTest {
                         .param("to", "2026-09-24T23:59:59Z"))
                 .andExpect(status().isOk());
 
-        // Unpermitted / unmapped endpoints require authentication and return 403 Forbidden
+        // Unpermitted / unmapped endpoints require authentication and return 401 Unauthorized
         mockMvc.perform(get("/api/v1/unpermitted-secured-endpoint"))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isUnauthorized());
     }
 
     @Test

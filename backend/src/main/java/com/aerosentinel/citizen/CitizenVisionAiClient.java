@@ -4,20 +4,25 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.io.*;
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.*;
 
 /**
- * Spring Boot Process Bridge for Gemini Vision Analysis of citizen observation photographs.
- * Reuses the existing Python vision pipeline (vision_service.py) via a bounded CLI bridge.
+ * Spring Boot HTTP REST Client for Gemini Vision Analysis of citizen observation photographs.
+ * Calls FastAPI AI Service (/api/v1/ml/vision/analyze) via HTTP REST.
  * Fully resilient: never throws fatal errors that would cause citizen reports to be rolled back.
  */
 @Component
@@ -26,9 +31,9 @@ public class CitizenVisionAiClient {
     private static final Logger log = LoggerFactory.getLogger(CitizenVisionAiClient.class);
     private static final ObjectMapper MAPPER = new ObjectMapper().findAndRegisterModules();
 
-    private final String pythonCommand;
-    private final String cliPath;
-    private final long timeoutMs;
+    private final String serviceUrl;
+    private final Duration timeout;
+    private final HttpClient httpClient;
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record CitizenVisionResultDto(
@@ -65,14 +70,29 @@ public class CitizenVisionAiClient {
         }
     }
 
+    @Autowired
     public CitizenVisionAiClient(
-            @Value("${app.citizen.vision.python-command:python}") String pythonCommand,
-            @Value("${app.citizen.vision.cli-path:ai-service/ml/inference/vision_cli.py}") String cliPath,
+            @Value("${app.ai-service.url:http://localhost:8000}") String serviceUrl,
             @Value("${app.citizen.vision.timeout-ms:30000}") long timeoutMs
     ) {
-        this.pythonCommand = pythonCommand;
-        this.cliPath = cliPath;
-        this.timeoutMs = timeoutMs;
+        this(serviceUrl, timeoutMs, HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofMillis(timeoutMs))
+                .build());
+    }
+
+    public CitizenVisionAiClient(String serviceUrl, long timeoutMs, HttpClient httpClient) {
+        this.serviceUrl = serviceUrl;
+        this.timeout = Duration.ofMillis(timeoutMs);
+        this.httpClient = httpClient;
+    }
+
+    /**
+     * Backward-compatibility constructor for tests migrating from process bridge.
+     */
+    @Deprecated
+    public CitizenVisionAiClient(String pythonCommand, String cliPath, long timeoutMs) {
+        this("http://localhost:8000", timeoutMs);
     }
 
     /**
@@ -90,11 +110,17 @@ public class CitizenVisionAiClient {
             return CitizenVisionResultDto.createFallback(repIdStr, h3Index, "Photo file not found on disk");
         }
 
-        Path scriptPath = resolveCliPath(cliPath);
         Map<String, Object> inputPayload = new LinkedHashMap<>();
         inputPayload.put("imagePath", imagePath.toAbsolutePath().toString());
         inputPayload.put("reportId", repIdStr);
         inputPayload.put("h3Index", h3Index != null ? h3Index : "unknown");
+
+        try {
+            byte[] bytes = Files.readAllBytes(imagePath);
+            inputPayload.put("imageBase64", Base64.getEncoder().encodeToString(bytes));
+        } catch (IOException e) {
+            log.warn("Could not read image bytes for report {}: {}", repIdStr, e.getMessage());
+        }
 
         String inputJson;
         try {
@@ -104,106 +130,46 @@ public class CitizenVisionAiClient {
             return CitizenVisionResultDto.createFallback(repIdStr, h3Index, "Payload serialization failure: " + e.getMessage());
         }
 
-        return executeProcess(scriptPath, inputJson, repIdStr, h3Index);
+        return executeHttpVision(inputJson, repIdStr, h3Index);
     }
 
-    private CitizenVisionResultDto executeProcess(Path scriptPath, String inputJson, String reportId, String h3Index) {
-        ProcessBuilder pb = new ProcessBuilder(pythonCommand, scriptPath.toString());
-        pb.redirectErrorStream(false);
+    private CitizenVisionResultDto executeHttpVision(String inputJson, String reportId, String h3Index) {
+        String endpoint = serviceUrl + "/api/v1/ml/vision/analyze";
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint))
+                .header("Content-Type", "application/json")
+                .timeout(timeout)
+                .POST(HttpRequest.BodyPublishers.ofString(inputJson, StandardCharsets.UTF_8))
+                .build();
 
-        Process process;
+        HttpResponse<String> response;
         try {
-            process = pb.start();
-        } catch (IOException e) {
-            log.warn("Failed to launch Python vision process using '{}': {}", pythonCommand, e.getMessage());
-            return CitizenVisionResultDto.createFallback(reportId, h3Index, "Python process launch failure: " + e.getMessage());
-        }
-
-        ExecutorService ioExecutor = Executors.newFixedThreadPool(2);
-        Future<String> stdoutFuture = ioExecutor.submit(() -> readStream(process.getInputStream()));
-        Future<String> stderrFuture = ioExecutor.submit(() -> readStream(process.getErrorStream()));
-
-        try (OutputStream os = process.getOutputStream();
-             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(os, StandardCharsets.UTF_8))) {
-            writer.write(inputJson);
-            writer.flush();
-        } catch (IOException e) {
-            process.destroyForcibly();
-            ioExecutor.shutdownNow();
-            log.warn("Failed to pipe input to vision CLI process: {}", e.getMessage());
-            return CitizenVisionResultDto.createFallback(reportId, h3Index, "STDIN pipe failure: " + e.getMessage());
-        }
-
-        boolean finished;
-        try {
-            finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
+            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (HttpTimeoutException te) {
+            log.warn("Vision HTTP request timed out after {} ms for report {}", timeout.toMillis(), reportId);
+            return CitizenVisionResultDto.createFallback(reportId, h3Index, "Vision service timed out after " + timeout.toMillis() + " ms");
+        } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
-            process.destroyForcibly();
-            ioExecutor.shutdownNow();
-            log.warn("Vision process interrupted for report {}", reportId);
+            log.warn("Vision HTTP request interrupted for report {}", reportId);
             return CitizenVisionResultDto.createFallback(reportId, h3Index, "Execution thread interrupted");
+        } catch (Exception ex) {
+            log.warn("Failed to connect to AI vision service at {}: {}", endpoint, ex.getMessage());
+            return CitizenVisionResultDto.createFallback(reportId, h3Index, "AI vision service unreachable: " + ex.getMessage());
         }
 
-        if (!finished) {
-            process.destroyForcibly();
-            ioExecutor.shutdownNow();
-            log.warn("Vision CLI timed out after {} ms for report {}", timeoutMs, reportId);
-            return CitizenVisionResultDto.createFallback(reportId, h3Index, "Vision process timed out after " + timeoutMs + " ms");
-        }
+        int statusCode = response.statusCode();
+        String body = response.body() != null ? response.body().trim() : "";
 
-        String stdout;
-        String stderr;
-        try {
-            stdout = stdoutFuture.get(2, TimeUnit.SECONDS);
-            stderr = stderrFuture.get(2, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            stdout = "";
-            stderr = "";
-        } finally {
-            ioExecutor.shutdown();
-        }
-
-        int exitCode = process.exitValue();
-        if (exitCode != 0) {
-            log.warn("Vision CLI exited with non-zero code {}. Stderr: {}", exitCode, stderr);
-            return CitizenVisionResultDto.createFallback(reportId, h3Index, "Process exit code " + exitCode + ": " + stderr);
+        if (statusCode != 200) {
+            log.warn("Vision service returned HTTP status {}: {}", statusCode, body);
+            return CitizenVisionResultDto.createFallback(reportId, h3Index, "Vision service returned HTTP " + statusCode + ": " + body);
         }
 
         try {
-            return MAPPER.readValue(stdout, CitizenVisionResultDto.class);
+            return MAPPER.readValue(body, CitizenVisionResultDto.class);
         } catch (Exception e) {
-            log.warn("Failed to parse vision CLI stdout JSON. Output: '{}', Error: {}", stdout, e.getMessage());
+            log.warn("Failed to parse vision service JSON. Output: '{}', Error: {}", body, e.getMessage());
             return CitizenVisionResultDto.createFallback(reportId, h3Index, "JSON parse failure: " + e.getMessage());
-        }
-    }
-
-    private Path resolveCliPath(String pathStr) {
-        Path p = Paths.get(pathStr);
-        if (Files.exists(p)) {
-            return p.toAbsolutePath();
-        }
-        Path fromParent = Paths.get("..", pathStr);
-        if (Files.exists(fromParent)) {
-            return fromParent.toAbsolutePath();
-        }
-        Path fromAiService = Paths.get("ai-service", "ml", "inference", "vision_cli.py");
-        if (Files.exists(fromAiService)) {
-            return fromAiService.toAbsolutePath();
-        }
-        return p.toAbsolutePath();
-    }
-
-    private String readStream(InputStream is) {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append("\n");
-            }
-            return sb.toString().trim();
-        } catch (IOException e) {
-            return "";
         }
     }
 }

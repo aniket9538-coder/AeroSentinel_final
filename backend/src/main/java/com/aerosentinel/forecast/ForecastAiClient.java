@@ -5,28 +5,32 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.io.*;
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.*;
-import java.util.concurrent.*;
 
 /**
- * Robust Spring Boot Process Bridge for F4-P3 Forecast Inference.
+ * Robust HTTP REST Client for F4-P3 Forecast Inference.
  *
  * Responsibilities:
- * 1. Safe process execution using ProcessBuilder (never raw shell strings).
- * 2. Feeds validated 36-feature vector and lineage context to predict_forecast_cli.py via STDIN.
- * 3. Enforces bounded execution timeout with automatic cleanup.
- * 4. Captures and parses strict JSON STDOUT response.
+ * 1. Executes HTTP POST to FastAPI AI Service (/api/v1/ml/forecast/predict).
+ * 2. Feeds validated 36-feature vector and lineage context via strict JSON.
+ * 3. Enforces bounded connection and response timeouts.
+ * 4. Captures and parses strict JSON response into ForecastInferenceResultDto.
  * 5. Performs rigorous Java-side validation of model output before returning to domain service.
+ * 6. Never fabricates values; provides explicit failure mapping.
  */
 @Component
 public class ForecastAiClient {
@@ -35,9 +39,9 @@ public class ForecastAiClient {
     private static final ObjectMapper MAPPER = new ObjectMapper().findAndRegisterModules();
     private static final Set<Integer> REQUIRED_HORIZONS = Set.of(1, 3, 6);
 
-    private final String pythonCommand;
-    private final String cliPath;
-    private final long timeoutMs;
+    private final String serviceUrl;
+    private final Duration timeout;
+    private final HttpClient httpClient;
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ForecastInferenceResultDto(
@@ -61,18 +65,33 @@ public class ForecastAiClient {
         ) {}
     }
 
+    @Autowired
     public ForecastAiClient(
-            @Value("${app.forecast.ai.python-command:python}") String pythonCommand,
-            @Value("${app.forecast.ai.cli-path:ai-service/ml/inference/predict_forecast_cli.py}") String cliPath,
+            @Value("${app.ai-service.url:http://localhost:8000}") String serviceUrl,
             @Value("${app.forecast.ai.timeout-ms:15000}") long timeoutMs
     ) {
-        this.pythonCommand = pythonCommand;
-        this.cliPath = cliPath;
-        this.timeoutMs = timeoutMs;
+        this(serviceUrl, timeoutMs, HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofMillis(timeoutMs))
+                .build());
+    }
+
+    public ForecastAiClient(String serviceUrl, long timeoutMs, HttpClient httpClient) {
+        this.serviceUrl = serviceUrl;
+        this.timeout = Duration.ofMillis(timeoutMs);
+        this.httpClient = httpClient;
     }
 
     /**
-     * Executes standalone multi-horizon inference via the Python CLI process bridge.
+     * Backward-compatibility constructor for tests migrating from process bridge.
+     */
+    @Deprecated
+    public ForecastAiClient(String pythonCommand, String cliPath, long timeoutMs) {
+        this("http://localhost:8000", timeoutMs);
+    }
+
+    /**
+     * Executes standalone multi-horizon inference via HTTP REST API.
      */
     public ForecastInferenceResultDto predict(UUID parentPredictionId, ModelReadyFeatureVector featureVector) {
         return predict(parentPredictionId, featureVector != null ? featureVector.baseTimestamp() : null, featureVector);
@@ -89,7 +108,6 @@ public class ForecastAiClient {
             throw new ForecastException.ValidationFailed("Feature vector must contain exactly 36 values");
         }
 
-        Path scriptPath = resolveCliPath(cliPath);
         Instant effectiveBase = baseTimestamp != null ? baseTimestamp : (featureVector.baseTimestamp() != null ? featureVector.baseTimestamp() : Instant.now());
         Map<String, Object> payload = buildCliPayload(parentPredictionId, effectiveBase, featureVector);
 
@@ -97,10 +115,10 @@ public class ForecastAiClient {
         try {
             inputJson = MAPPER.writeValueAsString(payload);
         } catch (Exception e) {
-            throw new ForecastException.ValidationFailed("Failed to serialize forecast CLI payload: " + e.getMessage());
+            throw new ForecastException.ValidationFailed("Failed to serialize forecast HTTP payload: " + e.getMessage());
         }
 
-        return executeProcess(scriptPath, inputJson, parentPredictionId, featureVector);
+        return executeHttpInference(inputJson, parentPredictionId, featureVector);
     }
 
     private Map<String, Object> buildCliPayload(UUID parentPredictionId, Instant baseTimestamp, ModelReadyFeatureVector vector) {
@@ -114,90 +132,55 @@ public class ForecastAiClient {
         return payload;
     }
 
-    private ForecastInferenceResultDto executeProcess(
-            Path scriptPath,
+    private ForecastInferenceResultDto executeHttpInference(
             String inputJson,
             UUID expectedParentId,
             ModelReadyFeatureVector vector
     ) {
-        ProcessBuilder pb = new ProcessBuilder(pythonCommand, scriptPath.toString());
-        pb.redirectErrorStream(false);
+        String endpoint = serviceUrl + "/api/v1/ml/forecast/predict";
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint))
+                .header("Content-Type", "application/json")
+                .timeout(timeout)
+                .POST(HttpRequest.BodyPublishers.ofString(inputJson, StandardCharsets.UTF_8))
+                .build();
 
-        Process process;
+        HttpResponse<String> response;
         try {
-            process = pb.start();
-        } catch (IOException e) {
-            log.error("Failed to start forecast inference process using command '{}': {}", pythonCommand, e.getMessage());
-            throw new ForecastException.AiUnavailable("Failed to start Python process: " + e.getMessage(), e);
-        }
-
-        // Asynchronously read stdout and stderr to prevent pipe buffer deadlocks
-        ExecutorService ioExecutor = Executors.newFixedThreadPool(2);
-        Future<String> stdoutFuture = ioExecutor.submit(() -> readStream(process.getInputStream()));
-        Future<String> stderrFuture = ioExecutor.submit(() -> readStream(process.getErrorStream()));
-
-        // Write input to STDIN
-        try (OutputStream os = process.getOutputStream();
-             BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(os, StandardCharsets.UTF_8))) {
-            writer.write(inputJson);
-            writer.flush();
-        } catch (IOException e) {
-            process.destroyForcibly();
-            ioExecutor.shutdownNow();
-            throw new ForecastException.AiUnavailable("Failed to pipe input to forecast inference process: " + e.getMessage(), e);
-        }
-
-        boolean finished;
-        try {
-            finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
+            response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (HttpTimeoutException te) {
+            log.error("Forecast HTTP inference timed out after {} ms for H3: {}", timeout.toMillis(), vector.h3Index());
+            throw new ForecastException.AiTimeout("Forecast HTTP inference timed out after " + timeout.toMillis() + " ms");
+        } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
-            process.destroyForcibly();
-            ioExecutor.shutdownNow();
-            throw new ForecastException.AiTimeout("Forecast inference process interrupted");
+            throw new ForecastException.AiTimeout("Forecast HTTP inference interrupted: " + ie.getMessage());
+        } catch (Exception ex) {
+            log.error("Failed to connect to AI forecast service at {}: {}", endpoint, ex.getMessage());
+            throw new ForecastException.AiUnavailable("AI forecast service unreachable: " + ex.getMessage(), ex);
         }
 
-        if (!finished) {
-            process.destroyForcibly();
-            ioExecutor.shutdownNow();
-            log.error("Forecast inference timed out after {} ms for H3: {}", timeoutMs, vector.h3Index());
-            throw new ForecastException.AiTimeout("Forecast inference timed out after " + timeoutMs + " ms");
-        }
+        int statusCode = response.statusCode();
+        String body = response.body() != null ? response.body().trim() : "";
 
-        String stdout;
-        String stderr;
-        try {
-            stdout = stdoutFuture.get(2, TimeUnit.SECONDS).trim();
-            stderr = stderrFuture.get(2, TimeUnit.SECONDS).trim();
-        } catch (Exception e) {
-            stdout = "";
-            stderr = "";
-        } finally {
-            ioExecutor.shutdownNow();
+        if (statusCode == 503 || body.contains("FORECAST_MODEL_UNAVAILABLE")) {
+            throw new ForecastException.AiUnavailable("Forecast model unavailable: " + body);
         }
-
-        int exitCode = process.exitValue();
-        if (exitCode != 0) {
-            log.warn("Forecast CLI exited with code {}. Stderr: '{}', Stdout: '{}'", exitCode, stderr, stdout);
-            if (exitCode == 2 || stdout.contains("FORECAST_MODEL_UNAVAILABLE")) {
-                throw new ForecastException.AiUnavailable("Forecast model unavailable: " + (stdout.isEmpty() ? stderr : stdout));
-            }
-            if (exitCode == 3 || stdout.contains("FORECAST_MODEL_CONTRACT_INVALID") || stdout.contains("INVALID_INPUT")) {
-                throw new ForecastException.ValidationFailed("Forecast input contract invalid: " + (stdout.isEmpty() ? stderr : stdout));
-            }
-            throw new ForecastException.AiUnavailable("Forecast inference failed with exit code " + exitCode + ": " + stderr);
+        if (statusCode == 400 || body.contains("INVALID_INPUT") || body.contains("FORECAST_MODEL_CONTRACT_INVALID")) {
+            throw new ForecastException.ValidationFailed("Forecast input contract invalid: " + body);
         }
-
-        if (stdout.isEmpty()) {
-            throw new ForecastException.AiUnavailable("Forecast CLI returned empty STDOUT");
+        if (statusCode != 200) {
+            throw new ForecastException.AiUnavailable("Forecast inference failed with HTTP status " + statusCode + ": " + body);
+        }
+        if (body.isEmpty()) {
+            throw new ForecastException.AiUnavailable("Forecast service returned empty response body");
         }
 
         ForecastInferenceResultDto result;
         try {
-            result = MAPPER.readValue(stdout, ForecastInferenceResultDto.class);
+            result = MAPPER.readValue(body, ForecastInferenceResultDto.class);
         } catch (Exception e) {
-            log.error("Failed to parse forecast CLI response JSON: '{}'. Error: {}", stdout, e.getMessage());
-            throw new ForecastException.AiUnavailable("Invalid JSON from forecast CLI: " + e.getMessage(), e);
+            log.error("Failed to parse forecast response JSON: '{}'. Error: {}", body, e.getMessage());
+            throw new ForecastException.AiUnavailable("Invalid JSON from forecast service: " + e.getMessage(), e);
         }
 
         validateInferenceResult(result, expectedParentId, vector);
@@ -294,41 +277,5 @@ public class ForecastAiClient {
         if (!seenHorizons.equals(REQUIRED_HORIZONS)) {
             throw new ForecastException.ValidationFailed("Forecasts must cover exact horizons [1, 3, 6], found: " + seenHorizons);
         }
-    }
-
-    private Path resolveCliPath(String configuredPath) {
-        Path direct = Paths.get(configuredPath);
-        if (Files.exists(direct)) {
-            return direct.toAbsolutePath().normalize();
-        }
-
-        Path fromParent = Paths.get("..").resolve(configuredPath);
-        if (Files.exists(fromParent)) {
-            return fromParent.toAbsolutePath().normalize();
-        }
-
-        Path userDir = Paths.get(System.getProperty("user.dir", "."));
-        Path candidate = userDir.resolve(configuredPath);
-        if (Files.exists(candidate)) {
-            return candidate.toAbsolutePath().normalize();
-        }
-
-        Path candidateParent = userDir.resolve("..").resolve(configuredPath);
-        if (Files.exists(candidateParent)) {
-            return candidateParent.toAbsolutePath().normalize();
-        }
-
-        throw new ForecastException.AiUnavailable("Forecast CLI script not found at configured path: " + configuredPath);
-    }
-
-    private String readStream(InputStream is) throws IOException {
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                sb.append(line).append("\n");
-            }
-        }
-        return sb.toString();
     }
 }

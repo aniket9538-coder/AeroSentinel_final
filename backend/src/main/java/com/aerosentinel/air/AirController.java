@@ -25,4 +25,13 @@ public class AirController {
     public ResponseEntity<List<AirObservation>> getStationObservations(@RequestParam String stationId) {
         return ResponseEntity.ok(airService.getStationObservations(stationId));
     }
+
+    @GetMapping("/trends")
+    public ResponseEntity<com.aerosentinel.dto.air.AirQualityTrendResponse> getAirQualityTrends(
+            @RequestParam UUID cityId,
+            @RequestParam(required = false) String stationCode,
+            @RequestParam(required = false, defaultValue = "50") Integer limit
+    ) {
+        return ResponseEntity.ok(airService.getAirQualityTrends(cityId, stationCode, limit));
+    }
 }

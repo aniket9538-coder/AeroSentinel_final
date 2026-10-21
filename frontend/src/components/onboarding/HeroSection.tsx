@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Play, X, ShieldCheck, Activity, Layers } from 'lucide-react';
+import { ArrowRight, Play, X, ShieldCheck, Activity, Layers, Compass } from 'lucide-react';
 import { HeroMetrics } from './hero/HeroMetrics';
 import { HeroMapVisual } from './hero/HeroMapVisual';
 
@@ -57,6 +57,30 @@ export const HeroSection: React.FC = () => {
           >
             <span>Get Started</span>
             <ArrowRight size={18} />
+          </button>
+
+          <button
+            className="onboarding-btn-citizen"
+            onClick={() => navigate('/citizen')}
+            type="button"
+            id="hero-citizen-portal-btn"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem 1.35rem',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.2) 0%, rgba(6, 182, 212, 0.15) 100%)',
+              border: '1px solid var(--brand-border)',
+              color: 'var(--brand-primary)',
+              fontWeight: 700,
+              fontSize: '0.92rem',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Compass size={18} />
+            <span>Citizen Portal</span>
           </button>
 
           <button

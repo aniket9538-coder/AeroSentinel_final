@@ -87,7 +87,7 @@ class PhotoStorageServiceTest {
     }
 
     @Test
-    @DisplayName("Rejects upload exceeding maximum size limit of 15MB")
+    @DisplayName("Rejects upload exceeding maximum size limit of 10MB")
     void testRejectsOversizedPhoto() {
         byte[] oversizedBytes = new byte[16];
         System.arraycopy(VALID_JPEG_BYTES, 0, oversizedBytes, 0, VALID_JPEG_BYTES.length);
@@ -100,13 +100,58 @@ class PhotoStorageServiceTest {
         ) {
             @Override
             public long getSize() {
-                return 16 * 1024 * 1024L; // 16 MB
+                return 11 * 1024 * 1024L; // 11 MB
             }
         };
 
         assertThatThrownBy(() -> photoStorageService.storePhoto(file))
                 .isInstanceOf(ValidationException.class)
-                .hasMessageContaining("exceeds maximum permitted size of 15MB");
+                .hasMessageContaining("exceeds maximum permitted size of 10MB");
+    }
+
+    @Test
+    @DisplayName("Successfully stores multiple valid photos up to 5 photos")
+    void testStoreMultiplePhotos() {
+        MockMultipartFile file1 = new MockMultipartFile("photo1", "p1.jpg", "image/jpeg", VALID_JPEG_BYTES);
+        MockMultipartFile file2 = new MockMultipartFile("photo2", "p2.png", "image/png", VALID_PNG_BYTES);
+        MockMultipartFile file3 = new MockMultipartFile("photo3", "p3.webp", "image/webp", VALID_WEBP_BYTES);
+
+        java.util.List<PhotoStorageService.StoredPhoto> stored = photoStorageService.storePhotos(java.util.List.of(file1, file2, file3));
+        assertThat(stored).hasSize(3);
+        for (PhotoStorageService.StoredPhoto p : stored) {
+            assertThat(Files.exists(p.absolutePath())).isTrue();
+        }
+    }
+
+    @Test
+    @DisplayName("Rejects upload exceeding 5 photos per submission")
+    void testRejectsExceedingFivePhotos() {
+        java.util.List<org.springframework.web.multipart.MultipartFile> list = new java.util.ArrayList<>();
+        for (int i = 0; i < 6; i++) {
+            list.add(new MockMultipartFile("photo" + i, "p" + i + ".jpg", "image/jpeg", VALID_JPEG_BYTES));
+        }
+
+        assertThatThrownBy(() -> photoStorageService.storePhotos(list))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Maximum 5 photos permitted");
+    }
+
+    @Test
+    @DisplayName("Rejects upload exceeding total aggregate limit of 25MB")
+    void testRejectsExceedingTotalSizeLimit() {
+        MockMultipartFile large1 = new MockMultipartFile("p1", "p1.jpg", "image/jpeg", VALID_JPEG_BYTES) {
+            @Override public long getSize() { return 9 * 1024 * 1024L; }
+        };
+        MockMultipartFile large2 = new MockMultipartFile("p2", "p2.jpg", "image/jpeg", VALID_JPEG_BYTES) {
+            @Override public long getSize() { return 9 * 1024 * 1024L; }
+        };
+        MockMultipartFile large3 = new MockMultipartFile("p3", "p3.jpg", "image/jpeg", VALID_JPEG_BYTES) {
+            @Override public long getSize() { return 9 * 1024 * 1024L; }
+        };
+
+        assertThatThrownBy(() -> photoStorageService.storePhotos(java.util.List.of(large1, large2, large3)))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("exceeds maximum permitted limit of 25MB");
     }
 
     @Test

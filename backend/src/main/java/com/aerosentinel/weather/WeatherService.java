@@ -51,7 +51,11 @@ public class WeatherService {
     }
 
     public List<WeatherObservation> getWeatherHistory(UUID cityId) {
-        return weatherRepository.findByCityIdOrderByObservedAtDesc(cityId);
+        return weatherRepository.findTop50ByCityIdOrderByObservedAtDesc(cityId);
+    }
+
+    public List<WeatherObservation> getWeatherHistory(UUID cityId, Integer limit) {
+        return weatherRepository.findTop50ByCityIdOrderByObservedAtDesc(cityId);
     }
 
     public Optional<WeatherObservation> getCurrentWeatherByH3(String h3Index) {

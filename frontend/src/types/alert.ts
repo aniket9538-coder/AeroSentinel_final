@@ -24,7 +24,7 @@ export interface AuthorityQueueItem {
   predictionId: string;
   cityId: string;
   cityName?: string | null;
-  status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'DISMISSED';
+  status: 'OPEN' | 'ACKNOWLEDGED' | 'ASSIGNED' | 'IN_INSPECTION' | 'ACTION_TAKEN' | 'RESOLVED' | 'CLOSED' | 'DISMISSED';
   severity: string;
   riskScore: number;
   evidenceScore: number;

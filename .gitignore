@@ -134,3 +134,13 @@ _final_temp/
 scratch/
 backend/uploads/*
 !backend/uploads/.gitkeep
+
+# Ephemeral test outputs & runtime storage
+backend/storage/
+storage/models/updates/*_sim-*.json
+storage/models/updates/*-362109.json
+storage/models/updates/*-9bc541.json
+storage/models/updates/*-8c0c27.json
+golden_paths_verification_results.json
+*.webp
+

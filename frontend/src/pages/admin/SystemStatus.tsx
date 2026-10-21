@@ -1,25 +1,42 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PageContainer } from '../../components/layout/PageContainer';
 import { Card } from '../../components/common/Card';
 import { Badge } from '../../components/common/Badge';
 import { Button } from '../../components/common/Button';
 import { useApp } from '../../store/AppContext';
-import { RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { fetchServiceHealth } from '../../services/adminApi';
+import { ServiceHealth } from '../../types/admin';
+import { RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, Database, Server, Cpu } from 'lucide-react';
 
 export const SystemStatus: React.FC = () => {
   const { backendStatus, backendHealth, checkBackendHealth } = useApp();
+  const [serviceHealth, setServiceHealth] = useState<ServiceHealth | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  const loadHealth = async () => {
+    try {
+      await checkBackendHealth();
+      const detailed = await fetchServiceHealth();
+      setServiceHealth(detailed);
+    } catch {
+      // Gracefully fall back to public health
+    }
+  };
+
+  useEffect(() => {
+    loadHealth();
+  }, []);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await checkBackendHealth();
+    await loadHealth();
     setRefreshing(false);
   };
 
   return (
     <PageContainer
       title="System Status & Telemetry Pipelines"
-      subtitle="F0 Foundation health checks and backend orchestrator integration status"
+      subtitle="Operational health checks, database connection pool telemetry, and AI service readiness"
       actions={
         <Button
           variant="outline"
@@ -28,7 +45,7 @@ export const SystemStatus: React.FC = () => {
           isLoading={refreshing}
         >
           <RefreshCw size={14} />
-          {refreshing ? 'Checking...' : 'Ping /api/v1/health'}
+          {refreshing ? 'Probing...' : 'Refresh Health'}
         </Button>
       }
     >
@@ -62,11 +79,19 @@ export const SystemStatus: React.FC = () => {
               </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Last Response Timestamp:</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Last Probe Timestamp:</span>
               <span style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                {backendHealth?.timestamp || 'Waiting for response...'}
+                {serviceHealth?.evaluatedAt ? new Date(serviceHealth.evaluatedAt).toLocaleTimeString() : backendHealth?.timestamp || 'Waiting for response...'}
               </span>
             </div>
+            {serviceHealth?.backend && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Active Threads:</span>
+                <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                  {serviceHealth.backend.activeThreads} threads
+                </span>
+              </div>
+            )}
           </div>
         </Card>
 
@@ -74,55 +99,71 @@ export const SystemStatus: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontWeight: 600 }}>Database Service:</span>
-              <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>PostgreSQL 16 + PostGIS 3.4</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                {serviceHealth?.database.databaseProduct || 'PostgreSQL 16 + PostGIS 3.4'}
+              </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 600 }}>Flyway Migrations:</span>
-              <Badge variant="success">V1 - V4 VALIDATED</Badge>
+              <span style={{ fontWeight: 600 }}>Connection Validity:</span>
+              <Badge variant={serviceHealth?.database.connectionValid ?? true ? 'success' : 'danger'}>
+                {serviceHealth?.database.connectionValid ?? true ? 'VALIDATED (UP)' : 'CONNECTION FAILED'}
+              </Badge>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Spatial Reference:</span>
               <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>SRID 4326 (WGS 84)</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>HikariCP Pool:</span>
-              <span style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--aqi-good)' }}>
-                Active (jdbc:postgresql://localhost:5432/aerosentinel)
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>HikariCP Pool Connections:</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--aqi-good)', fontWeight: 600 }}>
+                {serviceHealth?.database ? `${serviceHealth.database.activeConnections} active / ${serviceHealth.database.idleConnections} idle (${serviceHealth.database.totalConnections} total)` : 'Active (jdbc:postgresql://localhost:5432/aerosentinel)'}
               </span>
             </div>
           </div>
         </Card>
 
-        <Card title="Vite Frontend App Shell">
+        <Card title="Python FastAPI AI Inference Engine">
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 600 }}>Host / Port:</span>
-              <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>http://localhost:3000</span>
+              <span style={{ fontWeight: 600 }}>AI Service Endpoint:</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                {serviceHealth?.aiService.endpoint || 'http://localhost:8000'}
+              </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 600 }}>API Client Base:</span>
-              <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>/api/v1 (Proxy -&gt; 8080)</span>
+              <span style={{ fontWeight: 600 }}>AI Liveness / Readiness:</span>
+              <Badge variant={serviceHealth?.aiService.status === 'UP' ? 'success' : 'danger'}>
+                {serviceHealth?.aiService.status ?? 'CHECKING...'}
+              </Badge>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>CORS Origins Allowed:</span>
-              <span style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>localhost:3000, localhost:5173</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loaded ML Artifacts:</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                {serviceHealth?.aiService.loadedArtifacts.join(', ') || 'hotspot, forecast'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Inference Latency:</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                {serviceHealth?.aiService.latencyMs ? `${serviceHealth.aiService.latencyMs} ms` : 'N/A'}
+              </span>
             </div>
           </div>
         </Card>
 
-        <Card title="Architecture Guardrails">
+        <Card title="Architecture & Privacy Guardrails">
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 600 }}>Direct DB Access from Frontend:</span>
-              <Badge variant="success">BLOCKED (REST ONLY)</Badge>
+              <span style={{ fontWeight: 600 }}>Role Decoupling:</span>
+              <Badge variant="success">ADMIN / AUTHORITY SEPARATED</Badge>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 600 }}>Secrets Committed in Git:</span>
-              <Badge variant="success">NONE (.env.example only)</Badge>
+              <span style={{ fontWeight: 600 }}>Audit Trail Privacy:</span>
+              <Badge variant="success">CREDENTIAL & PII REDACTION</Badge>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Feature Scope:</span>
-              <Badge variant="info">F0 FOUNDATION LOCKED</Badge>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>F8 Monitoring Policy:</span>
+              <Badge variant="info">EXPLAINABLE GAP DETECTION</Badge>
             </div>
           </div>
         </Card>
@@ -130,4 +171,3 @@ export const SystemStatus: React.FC = () => {
     </PageContainer>
   );
 };
-

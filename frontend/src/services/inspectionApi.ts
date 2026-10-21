@@ -4,6 +4,7 @@ import {
   FieldVerification,
   InspectionResponse,
   AssignTeamRequest,
+  ReassignTeamRequest,
   SubmitVerificationRequest,
 } from '../types/inspection';
 
@@ -44,6 +45,26 @@ export const inspectionApi = {
     }
     const response = await apiClient.post<InspectionResponse>(
       `/alerts/${encodeURIComponent(alertId)}/assign`,
+      request
+    );
+    return response.data;
+  },
+
+  /**
+   * Reassigns an active field assignment to a different eligible municipal team (Feature 7 / Phase 8).
+   */
+  reassignFieldTeam: async (alertId: string, request: ReassignTeamRequest): Promise<InspectionResponse> => {
+    if (!alertId || !alertId.trim()) {
+      throw new Error('INVALID_INPUT: Alert ID cannot be empty');
+    }
+    if (!request.newTeamId || !request.newTeamId.trim()) {
+      throw new Error('INVALID_INPUT: New Team ID is required');
+    }
+    if (!request.reason || !request.reason.trim()) {
+      throw new Error('VALIDATION_ERROR: Reassignment reason is mandatory');
+    }
+    const response = await apiClient.post<InspectionResponse>(
+      `/alerts/${encodeURIComponent(alertId)}/reassign`,
       request
     );
     return response.data;

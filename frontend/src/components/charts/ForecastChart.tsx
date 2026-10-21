@@ -15,7 +15,7 @@ import { useApp } from '../../store/AppContext';
 
 export interface ForecastChartProps {
   forecasts?: ForecastItem[];
-  currentPm25?: number;
+  currentPm25?: number | null;
   baseTimestamp?: string | null;
   data?: { hour: string; predicted: number; lower?: number; upper?: number }[];
   height?: number;
@@ -23,7 +23,7 @@ export interface ForecastChartProps {
 
 export const ForecastChart: React.FC<ForecastChartProps> = ({
   forecasts = [],
-  currentPm25 = 78,
+  currentPm25,
   baseTimestamp,
   data,
   height = 340,
@@ -36,6 +36,25 @@ export const ForecastChart: React.FC<ForecastChartProps> = ({
     ? `T0 (${new Date(baseTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
     : 'T0 (Observed)';
 
+  const hasBaseObs = currentPm25 !== undefined && currentPm25 !== null && !isNaN(currentPm25);
+
+  const horizonPoints = ([...forecasts])
+    .sort((a, b) => a.horizonHours - b.horizonHours)
+    .map((f) => {
+      const timeFormatted = f.targetTime
+        ? new Date(f.targetTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : `+${f.horizonHours}h`;
+      return {
+        timeLabel: `+${f.horizonHours}h (${timeFormatted})`,
+        horizonHours: f.horizonHours,
+        observedPm25: undefined,
+        forecastPm25: f.predictedPm25,
+        lowerBound: f.lowerBound,
+        upperBound: f.upperBound,
+        isBase: false,
+      };
+    });
+
   // Build chart data: support both new forecasts array and optional legacy dashboard data
   const chartData = data
     ? data.map((d) => ({
@@ -47,7 +66,8 @@ export const ForecastChart: React.FC<ForecastChartProps> = ({
         upperBound: d.upper ?? d.predicted,
         isBase: d.hour.toUpperCase().includes('NOW'),
       }))
-    : [
+    : hasBaseObs
+    ? [
         {
           timeLabel: baseLabel,
           horizonHours: 0,
@@ -57,23 +77,9 @@ export const ForecastChart: React.FC<ForecastChartProps> = ({
           upperBound: currentPm25,
           isBase: true,
         },
-        ...([...forecasts])
-          .sort((a, b) => a.horizonHours - b.horizonHours)
-          .map((f) => {
-            const timeFormatted = f.targetTime
-              ? new Date(f.targetTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-              : `+${f.horizonHours}h`;
-            return {
-              timeLabel: `+${f.horizonHours}h (${timeFormatted})`,
-              horizonHours: f.horizonHours,
-              observedPm25: undefined,
-              forecastPm25: f.predictedPm25,
-              lowerBound: f.lowerBound,
-              upperBound: f.upperBound,
-              isBase: false,
-            };
-          }),
-      ];
+        ...horizonPoints,
+      ]
+    : horizonPoints;
 
   const gridColor = isDark ? 'rgba(255, 255, 255, 0.07)' : 'rgba(15, 23, 42, 0.08)';
   const textColor = isDark ? '#94a3b8' : '#64748b';

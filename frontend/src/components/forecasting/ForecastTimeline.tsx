@@ -4,12 +4,12 @@ import { Clock, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 interface ForecastTimelineProps {
   forecasts?: ForecastItem[];
-  currentPm25?: number;
+  currentPm25?: number | null;
 }
 
 export const ForecastTimeline: React.FC<ForecastTimelineProps> = ({
   forecasts = [],
-  currentPm25 = 78,
+  currentPm25,
 }) => {
   if (!forecasts || forecasts.length === 0) {
     return (
@@ -18,6 +18,8 @@ export const ForecastTimeline: React.FC<ForecastTimelineProps> = ({
       </div>
     );
   }
+
+  const hasCurrentPm25 = currentPm25 !== undefined && currentPm25 !== null && !isNaN(currentPm25);
 
   // Sort strictly by horizonHours ascending [1, 3, 6]
   const sorted = [...forecasts].sort((a, b) => a.horizonHours - b.horizonHours);
@@ -31,7 +33,7 @@ export const ForecastTimeline: React.FC<ForecastTimelineProps> = ({
       }}
     >
       {sorted.map((f) => {
-        const delta = Math.round(f.predictedPm25 - currentPm25);
+        const delta = hasCurrentPm25 ? Math.round(f.predictedPm25 - currentPm25) : null;
         const isElevated = f.predictedPm25 >= 100;
         const isModerate = f.predictedPm25 >= 60 && f.predictedPm25 < 100;
 
@@ -49,6 +51,8 @@ export const ForecastTimeline: React.FC<ForecastTimelineProps> = ({
               day: 'numeric',
             })
           : '';
+
+        const isPast = f.targetTime ? new Date(f.targetTime).getTime() < Date.now() : false;
 
         return (
           <div
@@ -78,7 +82,7 @@ export const ForecastTimeline: React.FC<ForecastTimelineProps> = ({
             {/* Top Row: Horizon + Target Timestamp */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.95rem' }}>
-                <Clock size={15} color="var(--accent-amber)" />
+                <Clock size={15} color={isPast ? 'var(--text-muted)' : 'var(--accent-amber)'} />
                 <span>+{f.horizonHours} Hour Horizon</span>
               </div>
               <span
@@ -87,19 +91,19 @@ export const ForecastTimeline: React.FC<ForecastTimelineProps> = ({
                   fontWeight: 600,
                   padding: '0.2rem 0.5rem',
                   borderRadius: '5px',
-                  background: 'var(--bg-glass)',
-                  color: 'var(--text-muted)',
-                  border: '1px solid var(--border-subtle)',
+                  background: isPast ? 'rgba(239, 68, 68, 0.12)' : 'var(--bg-glass)',
+                  color: isPast ? '#ef4444' : 'var(--text-muted)',
+                  border: isPast ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid var(--border-subtle)',
                 }}
               >
-                {targetDateFormatted} {targetFormatted}
+                {targetDateFormatted} {targetFormatted} {isPast ? '(Archived)' : ''}
               </span>
             </div>
 
             {/* PM2.5 Prediction Value */}
             <div style={{ marginBottom: '0.85rem' }}>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.25rem' }}>
-                Predicted PM2.5
+                {isPast ? 'Historical Predicted PM2.5 (Archived)' : 'Predicted PM2.5'}
               </div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem' }}>
                 <span
@@ -118,22 +122,34 @@ export const ForecastTimeline: React.FC<ForecastTimelineProps> = ({
               </div>
 
               {/* Delta vs T0 */}
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.25rem',
-                  fontSize: '0.75rem',
-                  color: delta > 0 ? 'var(--accent-rose)' : delta < 0 ? 'var(--accent-teal)' : 'var(--text-muted)',
-                  marginTop: '0.35rem',
-                  fontWeight: 600,
-                }}
-              >
-                {delta > 0 ? <TrendingUp size={13} /> : delta < 0 ? <TrendingDown size={13} /> : <Minus size={13} />}
-                <span>
-                  {delta > 0 ? `+${delta}` : delta} {f.unit === 'ug/m3' ? 'µg/m³' : f.unit} vs observed T0
-                </span>
-              </div>
+              {hasCurrentPm25 && delta != null ? (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    fontSize: '0.75rem',
+                    color: delta > 0 ? 'var(--accent-rose)' : delta < 0 ? 'var(--accent-teal)' : 'var(--text-muted)',
+                    marginTop: '0.35rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  {delta > 0 ? <TrendingUp size={13} /> : delta < 0 ? <TrendingDown size={13} /> : <Minus size={13} />}
+                  <span>
+                    {delta > 0 ? `+${delta}` : delta} {f.unit === 'ug/m3' ? 'µg/m³' : f.unit} vs observed T0
+                  </span>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    fontSize: '0.75rem',
+                    color: 'var(--text-muted)',
+                    marginTop: '0.35rem',
+                  }}
+                >
+                  No T0 observation to compare
+                </div>
+              )}
             </div>
 
             {/* Prediction Range */}

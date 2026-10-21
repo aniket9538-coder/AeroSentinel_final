@@ -2,6 +2,7 @@ package com.aerosentinel.federated;
 
 import com.aerosentinel.exception.ValidationException;
 import com.aerosentinel.federated.dto.*;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -203,7 +204,7 @@ class FederatedRoundServiceTest {
         assertThat(res.globalModelVersion()).isEqualTo("global-v2");
         assertThat(res.participatingNodesCount()).isEqualTo(3);
         assertThat(res.totalSamples()).isEqualTo(3000);
-        assertThat(res.artifactPath()).isEqualTo("storage/models/global/global-v2.joblib");
+        assertThat(res.artifactPath()).isEqualTo("storage/models/global/global-v2.json");
 
         // Mathematical verification:
         // Expected MAE = (1200*0.4312 + 800*0.4188 + 1000*0.0944) / 3000 = (517.44 + 335.04 + 94.4) / 3000 = 946.88 / 3000 = 0.3156
@@ -261,5 +262,81 @@ class FederatedRoundServiceTest {
         assertThat(dto.isActive()).isTrue();
         assertThat(dto.totalSamples()).isEqualTo(3000);
         assertThat(dto.metrics().mae()).isEqualTo(0.3156);
+    }
+
+    @Test
+    @DisplayName("Weights Validation: Rejects update when weights dimension != 37")
+    void testSubmitNodeUpdate_InvalidWeightsDimension() {
+        FederatedRound round = new FederatedRound("ROUND-001", "global-v1", 2, "[\"PUNE\"]");
+        when(roundRepository.findByRoundId("ROUND-001")).thenReturn(Optional.of(round));
+
+        // 10 weights instead of 37
+        List<Double> badWeights = List.of(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0);
+        NodeUpdateDto updateDto = new NodeUpdateDto(
+                "PUNE", "PUNE", "pune-v1", "global-v1", 100, badWeights,
+                new EvaluationMetricsDto(1.0, 2.0, 0.7, 0.2), "ref"
+        );
+
+        assertThatThrownBy(() -> roundService.submitNodeUpdate("ROUND-001", updateDto))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("Parameter weights dimension mismatch: expected 37 parameters");
+    }
+
+    @Test
+    @DisplayName("Weights Validation: Rejects parameter poisoning with extreme values")
+    void testSubmitNodeUpdate_PoisonedWeights() {
+        FederatedRound round = new FederatedRound("ROUND-001", "global-v1", 2, "[\"PUNE\"]");
+        when(roundRepository.findByRoundId("ROUND-001")).thenReturn(Optional.of(round));
+
+        List<Double> poisonedWeights = new ArrayList<>(Collections.nCopies(36, 1.0));
+        poisonedWeights.add(9999999.0); // Extreme poisoning value
+        NodeUpdateDto updateDto = new NodeUpdateDto(
+                "PUNE", "PUNE", "pune-v1", "global-v1", 100, poisonedWeights,
+                new EvaluationMetricsDto(1.0, 2.0, 0.7, 0.2), "ref"
+        );
+
+        assertThatThrownBy(() -> roundService.submitNodeUpdate("ROUND-001", updateDto))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("possible parameter poisoning");
+    }
+
+    @Test
+    @DisplayName("Mathematical FedAvg: Computes exact coordinate-wise sample-weighted weights vector")
+    void testTriggerAggregation_WithWeights_ExactFedAvg() throws Exception {
+        FederatedRound round = new FederatedRound("ROUND-003", "global-v1", 2, "[]");
+        when(roundRepository.findByRoundId("ROUND-003")).thenReturn(Optional.of(round));
+
+        // Node 1: 100 samples, all weights = 2.0
+        List<Double> w1 = Collections.nCopies(37, 2.0);
+        String w1Json = objectMapper.writeValueAsString(w1);
+        FederatedNodeUpdate u1 = new FederatedNodeUpdate(
+                "ROUND-003", "PUNE", "pune-v1", "global-v1", 100, w1Json, 1.0, 2.0, 0.8, 0.1, "ref"
+        );
+
+        // Node 2: 300 samples, all weights = 6.0
+        List<Double> w2 = Collections.nCopies(37, 6.0);
+        String w2Json = objectMapper.writeValueAsString(w2);
+        FederatedNodeUpdate u2 = new FederatedNodeUpdate(
+                "ROUND-003", "MUMBAI", "mumbai-v1", "global-v1", 300, w2Json, 2.0, 3.0, 0.7, 0.2, "ref"
+        );
+
+        // Expected coordinate-wise FedAvg: (100 * 2.0 + 300 * 6.0) / 400 = (200 + 1800) / 400 = 5.0
+        when(updateRepository.findByRoundId("ROUND-003")).thenReturn(List.of(u1, u2));
+        when(globalModelRepository.findAll()).thenReturn(Collections.emptyList());
+
+        AggregationResponse res = roundService.triggerAggregation("ROUND-003");
+
+        assertThat(res).isNotNull();
+        assertThat(res.totalSamples()).isEqualTo(400);
+
+        ArgumentCaptor<FederatedGlobalModel> captor = ArgumentCaptor.forClass(FederatedGlobalModel.class);
+        verify(globalModelRepository).save(captor.capture());
+        FederatedGlobalModel savedGlobal = captor.getValue();
+
+        List<Double> aggregatedWeights = objectMapper.readValue(savedGlobal.getWeightsJson(), new TypeReference<List<Double>>() {});
+        assertThat(aggregatedWeights).hasSize(37);
+        for (Double w : aggregatedWeights) {
+            assertThat(w).isEqualTo(5.0);
+        }
     }
 }

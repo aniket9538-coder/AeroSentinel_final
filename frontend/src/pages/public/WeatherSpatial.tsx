@@ -58,6 +58,10 @@ export const WeatherSpatial: React.FC = () => {
     refetchObservations,
   } = useGrid(selectedCity?.id);
 
+  // Phase 10: H3 Timeline & Layer Exploration
+  const [timelineHorizon, setTimelineHorizon] = React.useState<'T0' | 'T_MINUS_1' | 'T_PLUS_1' | 'T_PLUS_3' | 'T_PLUS_6'>('T0');
+  const [layerFilter, setLayerFilter] = React.useState<'ALL' | 'PM25' | 'WIND' | 'HUMIDITY'>('ALL');
+
   // Combined Refresh Handler
   const handleRefreshAll = useCallback(async () => {
     await Promise.allSettled([
@@ -278,6 +282,82 @@ export const WeatherSpatial: React.FC = () => {
           </div>
         }
       >
+        {/* Phase 10: H3 Timeline & Layer Exploration Control Bar */}
+        <div style={{
+          marginBottom: '1rem',
+          padding: '0.85rem 1rem',
+          borderRadius: '0.75rem',
+          background: 'var(--bg-surface-elevated)',
+          border: '1px solid var(--border-subtle)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.75rem',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+            {/* Timeline Horizon Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                H3 Timeline Horizon:
+              </span>
+              {(['T0', 'T_MINUS_1', 'T_PLUS_1', 'T_PLUS_3', 'T_PLUS_6'] as const).map((h) => {
+                const label = h === 'T0' ? 'Now (T+0)' : h === 'T_MINUS_1' ? 'Past (-1h)' : h === 'T_PLUS_1' ? 'Forecast (T+1h)' : h === 'T_PLUS_3' ? 'Forecast (T+3h)' : 'Forecast (T+6h)';
+                const isSelected = timelineHorizon === h;
+                return (
+                  <button
+                    key={h}
+                    onClick={() => setTimelineHorizon(h)}
+                    style={{
+                      padding: '0.25rem 0.65rem',
+                      borderRadius: '0.375rem',
+                      border: isSelected ? '1px solid var(--brand-primary)' : '1px solid var(--border-medium)',
+                      background: isSelected ? 'var(--brand-surface)' : 'transparent',
+                      color: isSelected ? 'var(--brand-primary)' : 'var(--text-secondary)',
+                      fontSize: '0.75rem',
+                      fontWeight: isSelected ? 700 : 500,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Layer Filter Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Layer:
+              </span>
+              {(['ALL', 'PM25', 'WIND', 'HUMIDITY'] as const).map((layer) => {
+                const label = layer === 'ALL' ? 'All Telemetry' : layer === 'PM25' ? 'PM2.5 Sensor' : layer === 'WIND' ? 'Wind Velocity' : 'Relative Humidity';
+                const isSelected = layerFilter === layer;
+                return (
+                  <button
+                    key={layer}
+                    onClick={() => setLayerFilter(layer)}
+                    style={{
+                      padding: '0.25rem 0.65rem',
+                      borderRadius: '0.375rem',
+                      border: isSelected ? '1px solid #10b981' : '1px solid var(--border-medium)',
+                      background: isSelected ? '#ecfdf5' : 'transparent',
+                      color: isSelected ? '#065f46' : 'var(--text-secondary)',
+                      fontSize: '0.75rem',
+                      fontWeight: isSelected ? 700 : 500,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+            <strong>Spatial Provenance Note:</strong> Real CPCB station telemetry is shown for Now (T+0). Forecast horizons (T+1h, T+3h, T+6h) reflect calibrated LightGBM regression horizons. Areas with unmonitored cells indicate observational gaps, not zero pollution.
+          </div>
+        </div>
+
         <div
           style={{
             display: 'grid',

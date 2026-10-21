@@ -64,7 +64,8 @@ public class AlertController {
             @RequestParam(required = false) UUID userId
     ) {
         enforceAuthorityAuthorization();
-        Alert updated = alertService.acknowledgeAlert(alertId, userId);
+        String actor = getAuthenticatedActor();
+        Alert updated = alertService.acknowledgeAlert(alertId, userId, actor);
         return ResponseEntity.ok(alertService.toAuthorityQueueItemDto(updated));
     }
 
@@ -78,10 +79,11 @@ public class AlertController {
             @RequestBody(required = false) com.aerosentinel.dto.action.ResolveAlertRequest request
     ) {
         enforceAuthorityAuthorization();
+        String actor = getAuthenticatedActor();
         String notes = request != null ? request.resolutionNotes() : null;
         UUID uid = (request != null && request.resolvedBy() != null) ? request.resolvedBy() : userId;
         boolean strict = request != null;
-        Alert updated = alertService.resolveAlert(alertId, uid, notes, strict);
+        Alert updated = alertService.resolveAlert(alertId, uid, notes, strict, actor);
         return ResponseEntity.ok(alertService.toAuthorityQueueItemDto(updated));
     }
 
@@ -95,16 +97,17 @@ public class AlertController {
             @RequestBody(required = false) com.aerosentinel.dto.action.DismissAlertRequest request
     ) {
         enforceAuthorityAuthorization();
+        String actor = getAuthenticatedActor();
         String reason = (request != null && request.dismissalReason() != null)
                 ? request.dismissalReason()
                 : "Dismissed by municipal authority";
         UUID uid = (request != null && request.dismissedBy() != null) ? request.dismissedBy() : userId;
-        Alert updated = alertService.dismissAlert(alertId, uid, reason);
+        Alert updated = alertService.dismissAlert(alertId, uid, reason, actor);
         return ResponseEntity.ok(alertService.toAuthorityQueueItemDto(updated));
     }
 
     // =========================================================================
-    // F5-P6 FIELD TEAM ASSIGNMENT & VERIFICATION INTEGRATION
+    // F5-P6 / F7-P8 FIELD TEAM ASSIGNMENT, REASSIGNMENT & VERIFICATION INTEGRATION
     // =========================================================================
 
     /**
@@ -119,8 +122,25 @@ public class AlertController {
         if (inspectionService == null) {
             return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
         }
+        String actor = getAuthenticatedActor();
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(inspectionService.assignFieldTeam(alertId, request));
+                .body(inspectionService.assignFieldTeam(alertId, request, actor));
+    }
+
+    /**
+     * Reassigns an alert to a different eligible municipal field team (F7-P8).
+     */
+    @PostMapping("/{alertId}/reassign")
+    public ResponseEntity<InspectionResponseDto> reassignFieldTeam(
+            @PathVariable UUID alertId,
+            @Valid @RequestBody com.aerosentinel.dto.inspection.ReassignTeamRequest request
+    ) {
+        enforceAuthorityAuthorization();
+        if (inspectionService == null) {
+            return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        }
+        String actor = getAuthenticatedActor();
+        return ResponseEntity.ok(inspectionService.reassignFieldTeam(alertId, request, actor));
     }
 
     /**
@@ -162,20 +182,70 @@ public class AlertController {
     }
 
     @PostMapping
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('AUTHORITY', 'ADMIN')")
     public ResponseEntity<Alert> createAlert(@RequestBody Alert alert) {
-        return ResponseEntity.ok(alertService.createAlert(alert));
+        enforceAuthorityAuthorization();
+
+        if (alert == null) {
+            throw new com.aerosentinel.exception.ValidationException("Alert payload must not be null");
+        }
+        if (alert.getCityId() == null) {
+            throw new com.aerosentinel.exception.ValidationException("Alert cityId is required");
+        }
+        if (alert.getGridCellId() == null) {
+            throw new com.aerosentinel.exception.ValidationException("Alert gridCellId is required");
+        }
+        if (alert.getTitle() == null || alert.getTitle().isBlank()) {
+            throw new com.aerosentinel.exception.ValidationException("Alert title must not be blank");
+        }
+        if (alert.getTitle().length() > 200) {
+            throw new com.aerosentinel.exception.ValidationException("Alert title exceeds maximum length of 200 characters");
+        }
+        if (alert.getMessage() == null || alert.getMessage().isBlank()) {
+            throw new com.aerosentinel.exception.ValidationException("Alert message must not be blank");
+        }
+        if (alert.getSeverity() == null || alert.getSeverity().isBlank()) {
+            throw new com.aerosentinel.exception.ValidationException("Alert severity is required");
+        }
+        String sevUpper = alert.getSeverity().trim().toUpperCase();
+        if (!java.util.Set.of("LOW", "MEDIUM", "HIGH", "CRITICAL").contains(sevUpper)) {
+            throw new com.aerosentinel.exception.ValidationException("Invalid alert severity: " + alert.getSeverity() + ". Supported values: LOW, MEDIUM, HIGH, CRITICAL");
+        }
+        alert.setSeverity(sevUpper);
+        if (alert.getStatus() == null || alert.getStatus().isBlank()) {
+            alert.setStatus("OPEN");
+        }
+        if (alert.getTriageState() == null || alert.getTriageState().isBlank()) {
+            alert.setTriageState("ALERT_CANDIDATE");
+        }
+        alert.setGeneratedBy("MANUAL_AUTHORITY");
+        alert.setCreatedAt(java.time.Instant.now());
+        alert.setUpdatedAt(java.time.Instant.now());
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(alertService.createAlert(alert));
     }
 
     private void enforceAuthorityAuthorization() {
         org.springframework.security.core.Authentication auth =
                 org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.isAuthenticated() && !(auth instanceof org.springframework.security.authentication.AnonymousAuthenticationToken)) {
-            boolean hasAuthorityRole = auth.getAuthorities().stream()
-                    .anyMatch(a -> a.getAuthority().equals("ROLE_AUTHORITY") || a.getAuthority().equals("ROLE_ADMIN"));
-            if (!hasAuthorityRole) {
-                throw new org.springframework.security.access.AccessDeniedException(
-                        "Access denied: Authority operational actions require AUTHORITY or ADMIN role");
-            }
+        if (auth == null || !auth.isAuthenticated() || auth instanceof org.springframework.security.authentication.AnonymousAuthenticationToken) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Access denied: Authentication required for authority operational actions");
         }
+        boolean hasAuthorityRole = auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_AUTHORITY") || a.getAuthority().equals("ROLE_ADMIN"));
+        if (!hasAuthorityRole) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                    "Access denied: Authority operational actions require AUTHORITY or ADMIN role");
+        }
+    }
+
+    private String getAuthenticatedActor() {
+        org.springframework.security.core.Authentication auth =
+                org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.isAuthenticated() && !(auth instanceof org.springframework.security.authentication.AnonymousAuthenticationToken)) {
+            return auth.getName();
+        }
+        return "Municipal Authority Officer";
     }
 }

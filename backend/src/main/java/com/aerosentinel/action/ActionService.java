@@ -2,6 +2,7 @@ package com.aerosentinel.action;
 
 import com.aerosentinel.alert.Alert;
 import com.aerosentinel.alert.AlertRepository;
+import com.aerosentinel.alert.AlertStatus;
 import com.aerosentinel.dto.action.ActionResponseDto;
 import com.aerosentinel.dto.action.RecordActionRequest;
 import com.aerosentinel.event.PollutionEvent;
@@ -67,6 +68,13 @@ public class ActionService {
         Alert alert = alertRepository.findById(request.alertId())
                 .orElseThrow(() -> new ResourceNotFoundException("Alert not found with id: " + request.alertId()));
 
+        String alertPrevStatus = alert.getStatus() != null ? alert.getStatus().trim().toUpperCase() : "OPEN";
+        AlertStatus.validateTransition(alertPrevStatus, "ACTION_TAKEN");
+        alert.setStatus("ACTION_TAKEN");
+        alert.setUpdatedAt(Instant.now());
+        alertRepository.save(alert);
+        log.info("Synchronized Alert id={} status to ACTION_TAKEN after action", alert.getId());
+
         PollutionEvent event = null;
         if (alert.getEventId() != null) {
             event = pollutionEventRepository.findById(alert.getEventId()).orElse(null);
@@ -103,7 +111,10 @@ public class ActionService {
                 alert.getId(),
                 request.actionType().trim().toUpperCase(),
                 request.notes().trim(),
-                officer
+                officer,
+                alertPrevStatus,
+                "ACTION_TAKEN",
+                request.notes().trim()
         );
 
         action = actionRepository.save(action);
@@ -121,7 +132,10 @@ public class ActionService {
                 action.getPerformedBy(),
                 action.getPerformedAt(),
                 eventStatus,
-                alertStatus
+                alertStatus,
+                action.getPreviousStatus(),
+                action.getNewStatus(),
+                action.getReason()
         );
     }
 
@@ -152,7 +166,10 @@ public class ActionService {
                         a.getPerformedBy(),
                         a.getPerformedAt(),
                         eventStatus,
-                        alertStatus
+                        alertStatus,
+                        a.getPreviousStatus(),
+                        a.getNewStatus(),
+                        a.getReason()
                 ))
                 .collect(Collectors.toList());
     }

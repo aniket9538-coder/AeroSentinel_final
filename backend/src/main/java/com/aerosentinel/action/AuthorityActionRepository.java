@@ -23,6 +23,8 @@ public interface AuthorityActionRepository extends JpaRepository<AuthorityAction
     @Query("SELECT a FROM AuthorityAction a WHERE a.alertId = :alertId ORDER BY a.performedAt DESC")
     List<AuthorityAction> findByAlertIdOrderByPerformedAtDesc(@Param("alertId") UUID alertId);
 
+    List<AuthorityAction> findTop50ByOrderByPerformedAtDesc();
+
     default List<AuthorityAction> findByEventIdOrderByPerformedAtDesc(String eventId) {
         try {
             return findByAlertIdOrderByPerformedAtDesc(UUID.fromString(eventId));

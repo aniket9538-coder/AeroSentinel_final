@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -48,6 +49,27 @@ class CitizenReportIntegrationTest {
     @Autowired
     private CityRepository cityRepository;
 
+    @Autowired
+    private com.aerosentinel.security.JwtService jwtService;
+
+    @Autowired
+    private CitizenLookupRateLimiter lookupRateLimiter;
+
+    @Autowired
+    private CitizenReportService citizenReportService;
+
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
+    private UUID createTestUser(String email, String role) {
+        UUID userId = UUID.randomUUID();
+        jdbcTemplate.update(
+                "INSERT INTO users (id, email, password_hash, full_name, role, active, created_at) VALUES (?, ?, ?, ?, ?, true, NOW())",
+                userId, email, "{noop}testpass", "Citizen Test User", role
+        );
+        return userId;
+    }
+
     private UUID puneCityId;
 
     // Real coordinates in Shivajinagar, Pune Metropolitan Region
@@ -59,6 +81,9 @@ class CitizenReportIntegrationTest {
 
     @BeforeEach
     void setUp() {
+        if (lookupRateLimiter != null) {
+            lookupRateLimiter.reset();
+        }
         City city = cityRepository.findByNameIgnoreCase("Pune")
                 .orElseGet(() -> {
                     City c = new City();
@@ -264,5 +289,275 @@ class CitizenReportIntegrationTest {
 
         // Verify zero GeminiAnalysis rows were fabricated
         assertThat(geminiAnalysisRepository.count()).isEqualTo(analysisCountBefore);
+    }
+
+    @Test
+    @DisplayName("Phase 6: Multi-photo submission succeeds and stores up to 5 photos")
+    void testMultiPhotoSubmissionSucceeds() throws Exception {
+        MockMultipartFile p1 = new MockMultipartFile("photos", "p1.jpg", "image/jpeg", SAMPLE_JPEG_BYTES);
+        MockMultipartFile p2 = new MockMultipartFile("photos", "p2.jpg", "image/jpeg", SAMPLE_JPEG_BYTES);
+
+        MvcResult result = mockMvc.perform(multipart("/api/v1/citizen/reports")
+                        .file(p1)
+                        .file(p2)
+                        .param("cityId", puneCityId.toString())
+                        .param("latitude", String.valueOf(REAL_PUNE_LAT))
+                        .param("longitude", String.valueOf(REAL_PUNE_LNG))
+                        .param("category", "SMOKE")
+                        .param("description", "Multiple photo angles of visible emission"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.id").exists())
+                .andExpect(jsonPath("$.photoUrls").isArray())
+                .andReturn();
+
+        JsonNode root = objectMapper.readTree(result.getResponse().getContentAsString());
+        assertThat(root.get("photoUrls").size()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("Phase 6: Rejection when exceeding 5 photos per submission")
+    void testRejectsExceedingFivePhotosInReport() throws Exception {
+        var builder = multipart("/api/v1/citizen/reports");
+        for (int i = 0; i < 6; i++) {
+            builder.file(new MockMultipartFile("photos", "p" + i + ".jpg", "image/jpeg", SAMPLE_JPEG_BYTES));
+        }
+        builder.param("cityId", puneCityId.toString())
+                .param("latitude", String.valueOf(REAL_PUNE_LAT))
+                .param("longitude", String.valueOf(REAL_PUNE_LNG))
+                .param("category", "SMOKE")
+                .param("description", "Excessive photos");
+
+        mockMvc.perform(builder).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("Phase 6: Rejects future incident timestamps")
+    void testRejectsFutureIncidentTimestamp() throws Exception {
+        mockMvc.perform(multipart("/api/v1/citizen/reports")
+                        .param("cityId", puneCityId.toString())
+                        .param("latitude", String.valueOf(REAL_PUNE_LAT))
+                        .param("longitude", String.valueOf(REAL_PUNE_LNG))
+                        .param("category", "SMOKE")
+                        .param("description", "Future event")
+                        .param("observedAt", java.time.Instant.now().plus(java.time.Duration.ofDays(2)).toString()))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("Phase 6: Receipt reference lookup resolves report status")
+    void testLookupByReceiptReference() throws Exception {
+        MvcResult submitResult = mockMvc.perform(multipart("/api/v1/citizen/reports")
+                        .param("cityId", puneCityId.toString())
+                        .param("latitude", String.valueOf(REAL_PUNE_LAT))
+                        .param("longitude", String.valueOf(REAL_PUNE_LNG))
+                        .param("category", "DUST")
+                        .param("description", "Road construction dust"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        JsonNode json = objectMapper.readTree(submitResult.getResponse().getContentAsString());
+        String repId = json.get("reportId").asText();
+
+        mockMvc.perform(get("/api/v1/citizen/reports/reference/" + repId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reportId").value(repId))
+                .andExpect(jsonPath("$.category").value("DUST"));
+    }
+
+    @Test
+    @DisplayName("Security: Receipt lookup applies data minimization for unauthenticated citizen tracking")
+    void testReceiptLookupDataMinimization() throws Exception {
+        MockMultipartFile photo = new MockMultipartFile("photo", "private_evidence.jpg", "image/jpeg", SAMPLE_JPEG_BYTES);
+
+        MvcResult submitResult = mockMvc.perform(multipart("/api/v1/citizen/reports")
+                        .file(photo)
+                        .param("cityId", puneCityId.toString())
+                        .param("latitude", String.valueOf(REAL_PUNE_LAT))
+                        .param("longitude", String.valueOf(REAL_PUNE_LNG))
+                        .param("category", "BURNING")
+                        .param("description", "Very specific private observation details near house #42"))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        JsonNode json = objectMapper.readTree(submitResult.getResponse().getContentAsString());
+        String refId = json.get("reportId").asText();
+
+        // Query anonymously through public receipt lookup
+        MvcResult lookupResult = mockMvc.perform(get("/api/v1/citizen/reports/reference/" + refId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reportId").value(refId))
+                .andExpect(jsonPath("$.category").value("BURNING"))
+                .andExpect(jsonPath("$.status").exists())
+                .andExpect(jsonPath("$.h3Index").exists())
+                .andExpect(jsonPath("$.id").doesNotExist())
+                .andExpect(jsonPath("$.cityId").doesNotExist())
+                .andExpect(jsonPath("$.latitude").doesNotExist())
+                .andExpect(jsonPath("$.longitude").doesNotExist())
+                .andExpect(jsonPath("$.imageUrl").doesNotExist())
+                .andExpect(jsonPath("$.photoUrls").isEmpty())
+                .andReturn();
+
+        JsonNode lookupJson = objectMapper.readTree(lookupResult.getResponse().getContentAsString());
+        // Description is masked with standard audit notice
+        assertThat(lookupJson.get("description").asText()).contains("auxiliary spatial evaluation");
+    }
+
+    @Test
+    @DisplayName("Security: Authenticated owner can access full dossier via receipt reference")
+    void testReceiptLookupAuthenticatedOwnerFullDossier() throws Exception {
+        UUID ownerId = createTestUser("owner-" + UUID.randomUUID() + "@example.com", "CITIZEN");
+        String ownerToken = "Bearer " + jwtService.generateToken(ownerId.toString(), "CITIZEN");
+
+        MockMultipartFile photo = new MockMultipartFile("photo", "owner_pic.jpg", "image/jpeg", SAMPLE_JPEG_BYTES);
+
+        // Submit as authenticated owner
+        CitizenReportResponseDto submitted = citizenReportService.submitReport(
+                puneCityId,
+                REAL_PUNE_LAT,
+                REAL_PUNE_LNG,
+                "SMOKE",
+                "Owner private note",
+                List.of(photo),
+                null,
+                ownerId
+        );
+        String refId = submitted.reportId();
+
+        // Query with owner token
+        mockMvc.perform(get("/api/v1/citizen/reports/reference/" + refId)
+                        .header("Authorization", ownerToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").exists())
+                .andExpect(jsonPath("$.cityId").exists())
+                .andExpect(jsonPath("$.latitude").value(REAL_PUNE_LAT))
+                .andExpect(jsonPath("$.longitude").value(REAL_PUNE_LNG))
+                .andExpect(jsonPath("$.description").value("Owner private note"))
+                .andExpect(jsonPath("$.photoUrls").isArray());
+    }
+
+    @Test
+    @DisplayName("Security: Enforce rate limiting on receipt reference lookup to prevent brute-force guessing")
+    void testReceiptLookupRateLimiterEnforced() throws Exception {
+        lookupRateLimiter.reset();
+
+        for (int i = 0; i < 20; i++) {
+            mockMvc.perform(get("/api/v1/citizen/reports/reference/CR-NONEXIST" + i))
+                    .andExpect(status().isNotFound());
+        }
+
+        // 21st attempt exceeds rate limit
+        mockMvc.perform(get("/api/v1/citizen/reports/reference/CR-NONEXIST99"))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(header().string("Retry-After", "60"));
+    }
+
+    @Test
+    @DisplayName("Security: IDOR protection on report details by ID prevents access to other users' reports")
+    void testReportDetailIdorProtection() throws Exception {
+        UUID userA = createTestUser("user-a-" + UUID.randomUUID() + "@example.com", "CITIZEN");
+        UUID userB = createTestUser("user-b-" + UUID.randomUUID() + "@example.com", "CITIZEN");
+
+        String tokenA = "Bearer " + jwtService.generateToken(userA.toString(), "CITIZEN");
+        String tokenB = "Bearer " + jwtService.generateToken(userB.toString(), "CITIZEN");
+        String authorityToken = "Bearer " + jwtService.generateToken("authority-user", "AUTHORITY");
+
+        CitizenReportResponseDto reportA = citizenReportService.submitReport(
+                puneCityId,
+                REAL_PUNE_LAT,
+                REAL_PUNE_LNG,
+                "ODOR",
+                "User A confidential report",
+                Collections.emptyList(),
+                null,
+                userA
+        );
+
+        UUID reportId = reportA.id();
+
+        // 1. User B cannot access User A's report by ID -> 403 Forbidden
+        mockMvc.perform(get("/api/v1/citizen/reports/" + reportId)
+                        .header("Authorization", tokenB))
+                .andExpect(status().isForbidden());
+
+        // 2. Anonymous caller cannot access User A's report by ID -> 403 Forbidden
+        mockMvc.perform(get("/api/v1/citizen/reports/" + reportId))
+                .andExpect(status().isForbidden());
+
+        // 3. User A can access own report -> 200 OK
+        mockMvc.perform(get("/api/v1/citizen/reports/" + reportId)
+                        .header("Authorization", tokenA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.description").value("User A confidential report"));
+
+        // 4. Authority can access report -> 200 OK
+        mockMvc.perform(get("/api/v1/citizen/reports/" + reportId)
+                        .header("Authorization", authorityToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.description").value("User A confidential report"));
+    }
+
+    @Test
+    @DisplayName("Security: Photo delivery authorization prevents unauthorized photo access for user reports")
+    void testPhotoAuthorizationProtection() throws Exception {
+        UUID userA = createTestUser("photo-user-a-" + UUID.randomUUID() + "@example.com", "CITIZEN");
+        UUID userB = createTestUser("photo-user-b-" + UUID.randomUUID() + "@example.com", "CITIZEN");
+
+        String tokenA = "Bearer " + jwtService.generateToken(userA.toString(), "CITIZEN");
+        String tokenB = "Bearer " + jwtService.generateToken(userB.toString(), "CITIZEN");
+        String authorityToken = "Bearer " + jwtService.generateToken("authority-user", "AUTHORITY");
+
+        MockMultipartFile photo = new MockMultipartFile("photos", "classified_scene.jpg", "image/jpeg", SAMPLE_JPEG_BYTES);
+
+        CitizenReportResponseDto reportA = citizenReportService.submitReport(
+                puneCityId,
+                REAL_PUNE_LAT,
+                REAL_PUNE_LNG,
+                "SMOKE",
+                "Classified observation",
+                List.of(photo),
+                null,
+                userA
+        );
+
+        String photoUrl = reportA.photoUrls().get(0);
+        String storageKey = photoUrl.substring(photoUrl.lastIndexOf('/') + 1);
+
+        // 1. Anonymous access is denied -> 403 Forbidden
+        mockMvc.perform(get("/api/v1/citizen/photos/" + storageKey))
+                .andExpect(status().isForbidden());
+
+        // 2. Different user access is denied -> 403 Forbidden
+        mockMvc.perform(get("/api/v1/citizen/photos/" + storageKey)
+                        .header("Authorization", tokenB))
+                .andExpect(status().isForbidden());
+
+        // 3. Owner access is allowed -> 200 OK
+        mockMvc.perform(get("/api/v1/citizen/photos/" + storageKey)
+                        .header("Authorization", tokenA))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("image/jpeg"));
+
+        // 4. Authority access is allowed -> 200 OK
+        mockMvc.perform(get("/api/v1/citizen/photos/" + storageKey)
+                        .header("Authorization", authorityToken))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("image/jpeg"));
+    }
+
+    @Test
+    @DisplayName("Security: Non-existent reference returns clean 404 without internal stack traces")
+    void testNonExistentReferenceCleanError() throws Exception {
+        MvcResult res = mockMvc.perform(get("/api/v1/citizen/reports/reference/CR-NOTREAL1"))
+                .andExpect(status().isNotFound())
+                .andReturn();
+
+        JsonNode json = objectMapper.readTree(res.getResponse().getContentAsString());
+        assertThat(json.has("status")).isTrue();
+        assertThat(json.get("status").asInt()).isEqualTo(404);
+        assertThat(json.get("error").asText()).isEqualTo("NOT_FOUND");
+        assertThat(json.has("message")).isTrue();
+        // Assert no stack trace is leaked
+        assertThat(json.has("trace")).isFalse();
+        assertThat(json.has("stackTrace")).isFalse();
     }
 }

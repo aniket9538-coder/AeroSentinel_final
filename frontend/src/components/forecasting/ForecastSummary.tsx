@@ -6,13 +6,13 @@ import { TrendingUp, Clock, BrainCircuit, ShieldAlert, Sparkles } from 'lucide-r
 
 interface ForecastSummaryProps {
   forecast?: ForecastResponse | null;
-  currentPm25?: number;
+  currentPm25?: number | null;
   cityName?: string;
 }
 
 export const ForecastSummary: React.FC<ForecastSummaryProps> = ({
   forecast,
-  currentPm25 = 78,
+  currentPm25,
   cityName = 'Pune',
 }) => {
   const items = forecast?.forecasts || [];
@@ -22,8 +22,9 @@ export const ForecastSummary: React.FC<ForecastSummaryProps> = ({
     ? items.reduce((max, cur) => (cur.predictedPm25 > max.predictedPm25 ? cur : max), items[0])
     : null;
 
-  const delta = peak ? Math.round(peak.predictedPm25 - currentPm25) : 0;
-  const pctDelta = peak && currentPm25 > 0 ? Math.round(((peak.predictedPm25 - currentPm25) / currentPm25) * 100) : 0;
+  const hasCurrentPm25 = currentPm25 !== undefined && currentPm25 !== null && !isNaN(currentPm25);
+  const delta = peak && hasCurrentPm25 ? Math.round(peak.predictedPm25 - currentPm25) : null;
+  const pctDelta = peak && hasCurrentPm25 && currentPm25 > 0 ? Math.round(((peak.predictedPm25 - currentPm25) / currentPm25) * 100) : null;
 
   return (
     <div>
@@ -47,7 +48,7 @@ export const ForecastSummary: React.FC<ForecastSummaryProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', flexWrap: 'wrap' }}>
           <div>
             <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginRight: '0.35rem' }}>Forecast model:</span>
-            <strong style={{ color: 'var(--text-primary)' }}>Random Forest</strong>
+            <strong style={{ color: 'var(--text-primary)' }}>Experimental ML (Random Forest)</strong>
           </div>
           <span style={{ color: 'var(--border-subtle)' }}>|</span>
           <div>
@@ -56,8 +57,8 @@ export const ForecastSummary: React.FC<ForecastSummaryProps> = ({
           </div>
           <span style={{ color: 'var(--border-subtle)' }}>|</span>
           <div>
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginRight: '0.35rem' }}>Data:</span>
-            <strong style={{ color: 'var(--brand-primary)' }}>Real observations</strong>
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginRight: '0.35rem' }}>Baseline Note:</span>
+            <strong style={{ color: 'var(--accent-amber)' }}>Persistence superior on holdout</strong>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -82,18 +83,18 @@ export const ForecastSummary: React.FC<ForecastSummaryProps> = ({
               Observed PM2.5
             </span>
             <span
-              style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--brand-primary)' }}
-              className="live-indicator-dot"
+              style={{ width: '8px', height: '8px', borderRadius: '50%', background: hasCurrentPm25 ? 'var(--brand-primary)' : 'var(--text-muted)' }}
+              className={hasCurrentPm25 ? 'live-indicator-dot' : ''}
             />
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', marginTop: '0.4rem' }}>
-            <span style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--brand-primary)', fontFamily: 'var(--font-mono)' }}>
-              {currentPm25}
+            <span style={{ fontSize: hasCurrentPm25 ? '2rem' : '1.5rem', fontWeight: 800, color: hasCurrentPm25 ? 'var(--brand-primary)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              {hasCurrentPm25 ? currentPm25 : '—'}
             </span>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>µg/m³</span>
+            {hasCurrentPm25 && <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>µg/m³</span>}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-            Observed at T0 · {cityName}
+            {hasCurrentPm25 ? `Observed at T0 · ${cityName}` : `Observation unavailable at T0 · ${cityName}`}
           </div>
         </Card>
 
@@ -111,8 +112,8 @@ export const ForecastSummary: React.FC<ForecastSummaryProps> = ({
             </span>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>µg/m³</span>
           </div>
-          <div style={{ fontSize: '0.75rem', color: delta >= 0 ? 'var(--accent-rose)' : 'var(--accent-teal)', marginTop: '0.35rem', fontWeight: 600 }}>
-            {peak ? `${pctDelta >= 0 ? '+' : '−'}${Math.abs(pctDelta)}% from observed` : 'No active forecast'}
+          <div style={{ fontSize: '0.75rem', color: delta != null && delta >= 0 ? 'var(--accent-rose)' : delta != null ? 'var(--accent-teal)' : 'var(--text-muted)', marginTop: '0.35rem', fontWeight: 600 }}>
+            {peak && pctDelta != null ? `${pctDelta >= 0 ? '+' : '−'}${Math.abs(pctDelta)}% from observed` : peak ? 'No T0 observation to compare' : 'No active forecast'}
           </div>
         </Card>
 

@@ -30,13 +30,30 @@ public class AuthorityAction {
     @Column(name = "performed_at")
     private Instant performedAt = Instant.now();
 
+    @Column(name = "previous_status", length = 50)
+    private String previousStatus;
+
+    @Column(name = "new_status", length = 50)
+    private String newStatus;
+
+    @Column(name = "reason", columnDefinition = "TEXT")
+    private String reason;
+
     public AuthorityAction() {}
 
     public AuthorityAction(UUID alertId, String actionType, String actionDetails, String performedBy) {
+        this(alertId, actionType, actionDetails, performedBy, null, null, null);
+    }
+
+    public AuthorityAction(UUID alertId, String actionType, String actionDetails, String performedBy,
+                           String previousStatus, String newStatus, String reason) {
         this.alertId = alertId;
         this.actionType = actionType;
         this.actionDetails = actionDetails;
         this.performedBy = performedBy;
+        this.previousStatus = previousStatus;
+        this.newStatus = newStatus;
+        this.reason = reason;
         this.performedAt = Instant.now();
     }
 
@@ -86,6 +103,30 @@ public class AuthorityAction {
 
     public void setPerformedAt(Instant performedAt) {
         this.performedAt = performedAt;
+    }
+
+    public String getPreviousStatus() {
+        return previousStatus;
+    }
+
+    public void setPreviousStatus(String previousStatus) {
+        this.previousStatus = previousStatus;
+    }
+
+    public String getNewStatus() {
+        return newStatus;
+    }
+
+    public void setNewStatus(String newStatus) {
+        this.newStatus = newStatus;
+    }
+
+    public String getReason() {
+        return reason;
+    }
+
+    public void setReason(String reason) {
+        this.reason = reason;
     }
 
     public String getActionId() { return id != null ? id.toString() : null; }

@@ -17,7 +17,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -33,7 +35,10 @@ public class PhotoStorageService {
 
     private static final Logger log = LoggerFactory.getLogger(PhotoStorageService.class);
 
-    public static final long MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15 MB
+    public static final long MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB per file
+    public static final long MAX_TOTAL_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB total submission
+    public static final int MAX_PHOTOS_PER_REPORT = 5;
+
     public static final Set<String> ALLOWED_MIME_TYPES = Set.of(
             "image/jpeg",
             "image/jpg",
@@ -82,7 +87,7 @@ public class PhotoStorageService {
         }
 
         if (file.getSize() > MAX_FILE_SIZE_BYTES) {
-            throw new ValidationException("Uploaded photo exceeds maximum permitted size of 15MB (" + file.getSize() + " bytes)");
+            throw new ValidationException("Uploaded photo exceeds maximum permitted size of 10MB (" + file.getSize() + " bytes)");
         }
 
         String contentType = file.getContentType();
@@ -112,6 +117,71 @@ public class PhotoStorageService {
 
         String accessUrl = "/api/v1/citizen/photos/" + storageKey;
         return new StoredPhoto(storageKey, accessUrl, targetPath, file.getSize(), contentType);
+    }
+
+    /**
+     * Stores up to 5 photos with aggregate size validation (max 25MB total).
+     * Cleans up any already saved files if any photo fails in the batch.
+     */
+    public List<StoredPhoto> storePhotos(List<MultipartFile> files) {
+        if (files == null || files.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<MultipartFile> validFiles = files.stream()
+                .filter(f -> f != null && !f.isEmpty())
+                .toList();
+
+        if (validFiles.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        if (validFiles.size() > MAX_PHOTOS_PER_REPORT) {
+            throw new ValidationException("Maximum " + MAX_PHOTOS_PER_REPORT + " photos permitted per submission (" + validFiles.size() + " provided)");
+        }
+
+        long totalBytes = validFiles.stream().mapToLong(MultipartFile::getSize).sum();
+        if (totalBytes > MAX_TOTAL_SIZE_BYTES) {
+            throw new ValidationException("Total uploaded photos size (" + totalBytes + " bytes) exceeds maximum permitted limit of 25MB");
+        }
+
+        List<StoredPhoto> storedList = new ArrayList<>();
+        try {
+            for (MultipartFile file : validFiles) {
+                storedList.add(storePhoto(file));
+            }
+            return storedList;
+        } catch (Exception e) {
+            // Rollback / cleanup on partial failure
+            for (StoredPhoto sp : storedList) {
+                try {
+                    deletePhoto(sp.storageKey());
+                } catch (Exception cleanupEx) {
+                    log.warn("Failed to delete partially uploaded photo {} during rollback: {}", sp.storageKey(), cleanupEx.getMessage());
+                }
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Safely deletes a stored photo file if it exists, enforcing traversal protection.
+     */
+    public boolean deletePhoto(String storageKey) {
+        if (storageKey == null || !SAFE_KEY_PATTERN.matcher(storageKey.trim()).matches()) {
+            return false;
+        }
+        try {
+            Path targetPath = uploadDir.resolve(storageKey.trim()).normalize();
+            if (targetPath.startsWith(uploadDir) && Files.exists(targetPath)) {
+                Files.delete(targetPath);
+                log.info("Deleted photo file from storage: {}", storageKey);
+                return true;
+            }
+        } catch (IOException e) {
+            log.warn("Failed to delete photo file {}: {}", storageKey, e.getMessage());
+        }
+        return false;
     }
 
     /**

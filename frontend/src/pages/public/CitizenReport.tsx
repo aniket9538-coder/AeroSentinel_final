@@ -30,6 +30,8 @@ import {
   ShieldCheck,
   HelpCircle,
   Database,
+  Search,
+  Image as ImageIcon,
 } from 'lucide-react';
 
 export const CitizenReport: React.FC = () => {
@@ -37,8 +39,10 @@ export const CitizenReport: React.FC = () => {
   const { reportId: routeReportId } = useParams<{ reportId?: string }>();
   const { selectedCity } = useApp();
 
+  const toLocalIso = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
   // -------------------------------------------------------------
-  // Form State
+  // Form State (Phase 6 Enhanced)
   // -------------------------------------------------------------
   const [coords, setCoords] = useState<{ lat: number; lng: number }>({
     lat: selectedCity?.latitude ?? 18.5204,
@@ -47,10 +51,16 @@ export const CitizenReport: React.FC = () => {
   const [h3Cell, setH3Cell] = useState<string>('');
   const [gpsDenied, setGpsDenied] = useState<boolean>(false);
   const [locationMethod, setLocationMethod] = useState<'GPS' | 'MAP' | 'DEFAULT'>('DEFAULT');
+  const [locationConfirmed, setLocationConfirmed] = useState<boolean>(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+  const [localPreviewUrls, setLocalPreviewUrls] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('SMOKE');
+  const [title, setTitle] = useState<string>('');
   const [description, setDescription] = useState('');
+  const [observedAt, setObservedAt] = useState<string>(() => toLocalIso(new Date()));
+  const [consentGiven, setConsentGiven] = useState<boolean>(false);
 
   // -------------------------------------------------------------
   // Submission & Post-Submission State
@@ -63,6 +73,17 @@ export const CitizenReport: React.FC = () => {
   // Evidence Lineage from F5 Orchestration
   const [evidenceSummary, setEvidenceSummary] = useState<EvidenceSummaryResponse | null>(null);
   const [isLoadingEvidence, setIsLoadingEvidence] = useState(false);
+
+  // -------------------------------------------------------------
+  // Right Panel Tabs: Live Feed, Receipt Lookup, My Reports
+  // -------------------------------------------------------------
+  const [activeTab, setActiveTab] = useState<'feed' | 'lookup' | 'my'>('feed');
+  const [lookupQuery, setLookupQuery] = useState<string>('');
+  const [lookupResult, setLookupResult] = useState<ICitizenReport | null>(null);
+  const [isLookingUp, setIsLookingUp] = useState<boolean>(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [myReports, setMyReports] = useState<ICitizenReport[]>([]);
+  const [isLoadingMyReports, setIsLoadingMyReports] = useState<boolean>(false);
 
   // -------------------------------------------------------------
   // Community Feed State
@@ -158,6 +179,7 @@ export const CitizenReport: React.FC = () => {
           setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
           setGpsDenied(false);
           setLocationMethod('GPS');
+          setLocationConfirmed(true);
         },
         (err) => {
           console.warn('Geolocation denied or unavailable:', err);
@@ -171,19 +193,65 @@ export const CitizenReport: React.FC = () => {
     }
   };
 
-  const handleImageSelected = (file: File) => {
-    setImageFile(file);
-    setLocalPreviewUrl(URL.createObjectURL(file));
+  const handlePhotosChange = (files: File[]) => {
+    setImageFiles(files);
+    setImageFile(files.length > 0 ? files[0] : null);
+    const urls = files.map((f) => URL.createObjectURL(f));
+    setLocalPreviewUrls(urls);
+    setLocalPreviewUrl(urls.length > 0 ? urls[0] : null);
     setErrorMessage(null);
   };
 
-  const handleClearImage = () => {
+  const handleClearImages = () => {
+    setImageFiles([]);
     setImageFile(null);
+    setLocalPreviewUrls([]);
     setLocalPreviewUrl(null);
   };
 
+  const handleImageSelected = (file: File) => {
+    handlePhotosChange([file]);
+  };
+
+  const handleClearImage = () => {
+    handleClearImages();
+  };
+
+  const handleLookupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!lookupQuery.trim() || isLookingUp) return;
+    setIsLookingUp(true);
+    setLookupError(null);
+    setLookupResult(null);
+
+    try {
+      const rep = await citizenService.getReportByReference(lookupQuery.trim());
+      setLookupResult(rep);
+    } catch (err: any) {
+      const msg = err?.response?.status === 404
+        ? `No citizen report found for reference "${lookupQuery.trim()}".`
+        : (err?.response?.data?.message || err?.message || 'Lookup failed. Please verify the reference and try again.');
+      setLookupError(msg);
+    } finally {
+      setIsLookingUp(false);
+    }
+  };
+
+  const handleFetchMyReports = async () => {
+    setIsLoadingMyReports(true);
+    try {
+      const data = await citizenService.getMyReports();
+      setMyReports(data);
+    } catch (err: any) {
+      console.warn('Could not load user reports:', err);
+      setMyReports([]);
+    } finally {
+      setIsLoadingMyReports(false);
+    }
+  };
+
   // -------------------------------------------------------------
-  // Submission Handler
+  // Submission Handler (Phase 6 Hardened)
   // -------------------------------------------------------------
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -192,6 +260,35 @@ export const CitizenReport: React.FC = () => {
     // Validation: Location
     if (coords.lat === undefined || coords.lng === undefined || isNaN(coords.lat) || isNaN(coords.lng)) {
       setErrorMessage('Target coordinates are required to map observation to an H3 spatial cell.');
+      return;
+    }
+
+    // Validation: Explicit Location Confirmation
+    if (!locationConfirmed) {
+      setErrorMessage('Please explicitly confirm the incident location on the map before submitting.');
+      return;
+    }
+
+    // Validation: Incident Date & Time
+    const parsedObserved = new Date(observedAt);
+    if (isNaN(parsedObserved.getTime())) {
+      setErrorMessage('A valid incident observation date and time is required.');
+      return;
+    }
+    if (parsedObserved.getTime() > Date.now() + 5 * 60 * 1000) {
+      setErrorMessage('Incident observation date and time cannot be in the future.');
+      return;
+    }
+
+    // Validation: Description
+    if (!description.trim()) {
+      setErrorMessage('Please provide a description of the observed environmental incident.');
+      return;
+    }
+
+    // Validation: Consent
+    if (!consentGiven) {
+      setErrorMessage('Citizen consent to automated evidence processing is required.');
       return;
     }
 
@@ -206,11 +303,18 @@ export const CitizenReport: React.FC = () => {
       formData.append('latitude', String(coords.lat));
       formData.append('longitude', String(coords.lng));
       formData.append('category', selectedCategory);
-      formData.append('description', description.trim() || `Observed ${selectedCategory} near ${selectedCity?.name || 'City'}.`);
-      if (imageFile) {
+      const combinedDesc = title.trim() ? `[${title.trim()}] ${description.trim()}` : description.trim();
+      formData.append('description', combinedDesc);
+      formData.append('observedAt', parsedObserved.toISOString());
+
+      if (imageFiles.length > 0) {
+        imageFiles.forEach((file) => {
+          formData.append('photos', file);
+        });
+        formData.append('photo', imageFiles[0]); // backward compatibility
+      } else if (imageFile) {
         formData.append('photo', imageFile);
       }
-      formData.append('observedAt', new Date().toISOString());
 
       const result = await citizenService.submitReport(formData);
 
@@ -228,7 +332,6 @@ export const CitizenReport: React.FC = () => {
       citizenService.getReports(cityId).then(setReports).catch(() => {});
     } catch (err: any) {
       console.error('Failed to submit citizen report:', err);
-      // Evaluator requirement 11: If report was persisted but AI analysis fails, do not claim submission failed
       const msg = err?.response?.data?.message || err?.message || 'Report submission failed. Please try again.';
       setErrorMessage(msg);
     } finally {
@@ -239,14 +342,20 @@ export const CitizenReport: React.FC = () => {
   const resetForm = () => {
     setSubmittedReport(null);
     setImageFile(null);
+    setImageFiles([]);
     setLocalPreviewUrl(null);
+    setLocalPreviewUrls([]);
     setDescription('');
+    setTitle('');
     setSelectedCategory('SMOKE');
+    setLocationConfirmed(false);
+    setConsentGiven(false);
+    setObservedAt(toLocalIso(new Date()));
     setErrorMessage(null);
     setIsPersistedWithDegradedAi(false);
     setEvidenceSummary(null);
     if (routeReportId) {
-      navigate('/report');
+      navigate('/citizen/report');
     }
   };
 
@@ -458,7 +567,7 @@ export const CitizenReport: React.FC = () => {
                   Location (H3 Hex): <strong style={{ fontFamily: 'var(--font-mono)', color: 'var(--brand-primary)' }}>{activeH3}</strong>
                 </div>
                 <div>
-                  Internal ID: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{submittedReport.id}</span>
+                  Internal ID: <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{submittedReport.id || submittedReport.reportId}</span>
                 </div>
                 <div>
                   Submitted:{' '}
@@ -494,6 +603,81 @@ export const CitizenReport: React.FC = () => {
                 Your report has been securely registered in H3 cell {activeH3} and will be evaluated as auxiliary evidence.
               </div>
             </div>
+          )}
+
+          {/* Dedicated Photographic Evidence Gallery (Multi-Photo Support) */}
+          {((submittedReport.photoUrls && submittedReport.photoUrls.length > 0) || submittedReport.imageUrl || localPreviewUrls.length > 0) && (
+            <Card
+              title="Attached Photographic Evidence"
+              subtitle="Ground-level raster imagery stored with private, server-authorized keys"
+              badge={
+                <Badge variant="info">
+                  {(submittedReport.photoUrls?.length || (submittedReport.imageUrl ? 1 : localPreviewUrls.length))} Photo(s) Attached
+                </Badge>
+              }
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+                  gap: '1rem',
+                  marginTop: '0.5rem',
+                }}
+              >
+                {(submittedReport.photoUrls && submittedReport.photoUrls.length > 0
+                  ? submittedReport.photoUrls
+                  : submittedReport.imageUrl
+                  ? [submittedReport.imageUrl]
+                  : localPreviewUrls
+                ).map((url, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      border: '1px solid var(--border-medium, #cbd5e1)',
+                      background: 'var(--bg-canvas, #0f172a)',
+                      position: 'relative',
+                    }}
+                  >
+                    <img
+                      src={url}
+                      alt={`Evidence photo ${idx + 1}`}
+                      style={{
+                        width: '100%',
+                        height: '140px',
+                        objectFit: 'cover',
+                        display: 'block',
+                      }}
+                      onError={(e) => {
+                        if (localPreviewUrls[idx]) {
+                          (e.target as HTMLImageElement).src = localPreviewUrls[idx];
+                        }
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        background: 'rgba(15, 23, 42, 0.75)',
+                        backdropFilter: 'blur(4px)',
+                        padding: '0.3rem 0.6rem',
+                        fontSize: '0.7rem',
+                        color: '#fff',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>Photo #{idx + 1}</span>
+                      <span style={{ color: 'var(--accent-teal, #10b981)', fontSize: '0.65rem' }}>Authorized</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
           )}
 
           {/* Dedicated Gemini Vision Analysis Card (Sections 5, 6, 7) */}
@@ -703,14 +887,64 @@ export const CitizenReport: React.FC = () => {
                   onSelectLocation={(newCoords) => {
                     setCoords(newCoords);
                     setLocationMethod('MAP');
+                    setLocationConfirmed(true);
                   }}
                   height="260px"
                 />
+
+                {/* Explicit Incident Location Confirmation Checkbox & Action */}
+                <div
+                  style={{
+                    padding: '0.75rem 1rem',
+                    borderRadius: '8px',
+                    background: locationConfirmed ? 'rgba(16, 185, 129, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+                    border: locationConfirmed ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(245, 158, 11, 0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '0.75rem',
+                  }}
+                >
+                  <label
+                    htmlFor="confirm-incident-location"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.6rem',
+                      cursor: 'pointer',
+                      fontSize: '0.82rem',
+                      color: 'var(--text-primary)',
+                      margin: 0,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      id="confirm-incident-location"
+                      checked={locationConfirmed}
+                      onChange={(e) => setLocationConfirmed(e.target.checked)}
+                      style={{ width: '16px', height: '16px', accentColor: 'var(--accent-teal, #10b981)' }}
+                    />
+                    <span>
+                      <strong>I confirm this location</strong> (Lat {coords.lat.toFixed(4)}, Lng {coords.lng.toFixed(4)}) is the accurate incident site.
+                    </span>
+                  </label>
+                  {!locationConfirmed && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setLocationConfirmed(true)}
+                    >
+                      <Check size={14} style={{ marginRight: '0.35rem' }} /> Confirm Location
+                    </Button>
+                  )}
+                </div>
               </div>
             </Card>
 
             {/* -------------------------------------------------------------
-                STEP 2: PHOTO EVIDENCE
+                STEP 2: PHOTO EVIDENCE (Up to 5 Photos, max 10MB/file, 25MB total)
                 ------------------------------------------------------------- */}
             <Card
               title={
@@ -734,12 +968,14 @@ export const CitizenReport: React.FC = () => {
                   <span>Photo Evidence</span>
                 </div>
               }
-              subtitle="Attach ground imagery for automated Gemini multimodal verification"
+              subtitle="Attach ground imagery (up to 5 photos) for secure storage and automated Gemini multimodal verification"
+              badge={<Badge variant="info">Max 5 &bull; 10MB/file</Badge>}
             >
               <div style={{ marginTop: '0.5rem' }}>
                 <ImageUploader
+                  onPhotosChange={handlePhotosChange}
                   onImageSelected={handleImageSelected}
-                  onClearImage={handleClearImage}
+                  onClearImage={handleClearImages}
                 />
               </div>
             </Card>
@@ -769,7 +1005,7 @@ export const CitizenReport: React.FC = () => {
                   <span>Description & Observation Type</span>
                 </div>
               }
-              subtitle="Select observed emission type and provide contextual description"
+              subtitle="Select observed emission type, datetime, and provide contextual details"
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', marginTop: '0.5rem' }}>
                 {/* Category Selection Cards */}
@@ -819,6 +1055,79 @@ export const CitizenReport: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Incident Date and Time */}
+                <div>
+                  <label
+                    htmlFor="citizen-observed-at-input"
+                    style={{
+                      display: 'block',
+                      fontSize: '0.78rem',
+                      color: 'var(--text-muted)',
+                      marginBottom: '0.4rem',
+                      fontWeight: 600,
+                    }}
+                  >
+                    INCIDENT DATE &amp; TIME (OBSERVED):
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      type="datetime-local"
+                      id="citizen-observed-at-input"
+                      value={observedAt}
+                      max={toLocalIso(new Date())}
+                      onChange={(e) => {
+                        setObservedAt(e.target.value);
+                        setErrorMessage(null);
+                      }}
+                      style={{
+                        padding: '0.65rem 0.85rem',
+                        borderRadius: '8px',
+                        background: 'var(--bg-surface-elevated, #ffffff)',
+                        border: '1px solid var(--border-medium, #cbd5e1)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.85rem',
+                        fontFamily: 'inherit',
+                      }}
+                    />
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                      Timestamp must not be in the future.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Short Report Title (Optional) */}
+                <div>
+                  <label
+                    htmlFor="citizen-title-input"
+                    style={{
+                      display: 'block',
+                      fontSize: '0.78rem',
+                      color: 'var(--text-muted)',
+                      marginBottom: '0.4rem',
+                      fontWeight: 600,
+                    }}
+                  >
+                    SHORT TITLE (OPTIONAL):
+                  </label>
+                  <input
+                    type="text"
+                    id="citizen-title-input"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="e.g. Heavy black smoke behind factory gate"
+                    style={{
+                      width: '100%',
+                      padding: '0.65rem 0.85rem',
+                      borderRadius: '8px',
+                      background: 'var(--bg-surface-elevated, #ffffff)',
+                      border: '1px solid var(--border-medium, #cbd5e1)',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.85rem',
+                      fontFamily: 'inherit',
+                    }}
+                  />
+                </div>
+
                 {/* Description Input */}
                 <div>
                   <label
@@ -831,7 +1140,7 @@ export const CitizenReport: React.FC = () => {
                       fontWeight: 600,
                     }}
                   >
-                    DESCRIPTION (CONTEXTUAL DETAILS):
+                    DESCRIPTION (CONTEXTUAL DETAILS): <span style={{ color: 'var(--accent-red, #ef4444)' }}>*</span>
                   </label>
                   <textarea
                     id="citizen-description-input"
@@ -850,6 +1159,7 @@ export const CitizenReport: React.FC = () => {
                       fontFamily: 'inherit',
                       resize: 'vertical',
                     }}
+                    required
                   />
                   <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>
                     Describe visibility, duration, and proximity to sensitive receptors or industrial clusters.
@@ -861,7 +1171,49 @@ export const CitizenReport: React.FC = () => {
             {/* -------------------------------------------------------------
                 STEP 4: SUBMIT CTA
                 ------------------------------------------------------------- */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Privacy Notice & Consent Card */}
+              <div
+                style={{
+                  padding: '1rem',
+                  borderRadius: '10px',
+                  background: 'var(--bg-surface-elevated, #f8fafc)',
+                  border: '1px solid var(--border-subtle, #e2e8f0)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.65rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem' }}>
+                  <ShieldCheck size={20} style={{ color: 'var(--brand-primary, #0284c7)', flexShrink: 0, marginTop: '2px' }} />
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                    <strong>Privacy Notice &amp; Auxiliary Evidence Notice:</strong> Ground observations and uploaded photographic evidence are securely stored and analyzed as auxiliary inputs by AeroSentinel. Citizen evidence alone does not trigger official enforcement actions, warnings, or conclusive violations.
+                  </div>
+                </div>
+                <label
+                  htmlFor="citizen-consent-checkbox"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                    marginTop: '0.25rem',
+                    cursor: 'pointer',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    id="citizen-consent-checkbox"
+                    checked={consentGiven}
+                    onChange={(e) => setConsentGiven(e.target.checked)}
+                    style={{ width: '16px', height: '16px', accentColor: 'var(--brand-primary, #0284c7)' }}
+                  />
+                  <span>I consent to the secure storage and automated analysis of this incident report and any attached photographs.</span>
+                </label>
+              </div>
+
               <Button
                 type="submit"
                 variant="primary"
@@ -882,13 +1234,222 @@ export const CitizenReport: React.FC = () => {
             </div>
           </form>
 
-          {/* Right Side: Community Feed */}
-          <div>
-            <ReportStatus
-              reports={reports}
-              onSelectReport={(r) => navigate(`/report/status/${r.id}`)}
-              selectedReportId={undefined}
-            />
+          {/* Right Side: Tabbed Interface for Community Feed, Lookup & My Reports */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                background: 'var(--bg-surface-elevated, #f1f5f9)',
+                borderRadius: '8px',
+                padding: '4px',
+                gap: '4px',
+                border: '1px solid var(--border-subtle, #e2e8f0)',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setActiveTab('feed')}
+                style={{
+                  flex: 1,
+                  padding: '0.45rem 0.6rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: activeTab === 'feed' ? 'var(--bg-card, #ffffff)' : 'transparent',
+                  color: activeTab === 'feed' ? 'var(--brand-primary, #0284c7)' : 'var(--text-secondary)',
+                  fontWeight: activeTab === 'feed' ? 700 : 500,
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  boxShadow: activeTab === 'feed' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                Feed ({reports.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('lookup')}
+                style={{
+                  flex: 1,
+                  padding: '0.45rem 0.6rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: activeTab === 'lookup' ? 'var(--bg-card, #ffffff)' : 'transparent',
+                  color: activeTab === 'lookup' ? 'var(--brand-primary, #0284c7)' : 'var(--text-secondary)',
+                  fontWeight: activeTab === 'lookup' ? 700 : 500,
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  boxShadow: activeTab === 'lookup' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                Track Receipt
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('my');
+                  handleFetchMyReports();
+                }}
+                style={{
+                  flex: 1,
+                  padding: '0.45rem 0.6rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: activeTab === 'my' ? 'var(--bg-card, #ffffff)' : 'transparent',
+                  color: activeTab === 'my' ? 'var(--brand-primary, #0284c7)' : 'var(--text-secondary)',
+                  fontWeight: activeTab === 'my' ? 700 : 500,
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  boxShadow: activeTab === 'my' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                My Submissions
+              </button>
+            </div>
+
+            {activeTab === 'feed' && (
+              <ReportStatus
+                reports={reports}
+                onSelectReport={(r) => navigate(`/report/status/${r.id}`)}
+                selectedReportId={undefined}
+              />
+            )}
+
+            {activeTab === 'lookup' && (
+              <Card
+                title="Receipt &amp; Status Lookup"
+                subtitle="Track your evidence submission using its official server-issued reference code"
+                badge={<Badge variant="info">Audit Verified</Badge>}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+                  <form onSubmit={handleLookupSubmit} style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      placeholder="e.g. CR-09F21B90 or UUID"
+                      value={lookupQuery}
+                      onChange={(e) => setLookupQuery(e.target.value)}
+                      style={{
+                        flex: 1,
+                        padding: '0.65rem 0.85rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-medium, #cbd5e1)',
+                        background: 'var(--bg-surface-elevated, #ffffff)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.85rem',
+                        fontFamily: 'var(--font-mono, monospace)',
+                      }}
+                    />
+                    <Button type="submit" variant="primary" size="sm" disabled={isLookingUp || !lookupQuery.trim()}>
+                      {isLookingUp ? 'Searching...' : 'Track'}
+                    </Button>
+                  </form>
+
+                  {lookupError && (
+                    <div style={{ padding: '0.75rem', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', color: 'var(--accent-red, #ef4444)', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+                      <span>{lookupError}</span>
+                    </div>
+                  )}
+
+                  {lookupResult && (
+                    <div
+                      style={{
+                        padding: '1rem',
+                        borderRadius: '10px',
+                        background: 'var(--bg-surface-elevated, #f8fafc)',
+                        border: '1px solid var(--border-subtle, #e2e8f0)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.75rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.78rem', fontWeight: 800, fontFamily: 'var(--font-mono)', color: 'var(--brand-primary)' }}>
+                          {lookupResult.reportId || `CR-${lookupResult.id.slice(0, 8).toUpperCase()}`}
+                        </span>
+                        <Badge variant={lookupResult.status === 'VERIFIED' ? 'success' : 'neutral'}>
+                          {lookupResult.status || 'ANALYZED'}
+                        </Badge>
+                      </div>
+
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-primary)' }}>
+                        <strong>Category:</strong> {lookupResult.category}
+                      </div>
+
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                        {lookupResult.description}
+                      </div>
+
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                        Observed: {new Date(lookupResult.submittedAt).toLocaleString()}
+                      </div>
+
+                      {lookupResult.h3Index && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                          Spatial Cell: <strong style={{ fontFamily: 'var(--font-mono)' }}>{lookupResult.h3Index}</strong>
+                        </div>
+                      )}
+
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setSubmittedReport(lookupResult)}
+                        style={{ marginTop: '0.25rem' }}
+                      >
+                        <Eye size={14} style={{ marginRight: '0.35rem' }} /> View Full Dossier
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            )}
+
+            {activeTab === 'my' && (
+              <Card
+                title="My Submitted Evidence"
+                subtitle="Reports tied to your authenticated citizen identity"
+              >
+                {isLoadingMyReports ? (
+                  <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                    Retrieving your submissions...
+                  </div>
+                ) : myReports.length === 0 ? (
+                  <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <ShieldCheck size={28} style={{ margin: '0 auto 0.5rem auto', opacity: 0.4 }} />
+                    <p style={{ fontSize: '0.85rem', fontWeight: 500 }}>No reports associated with current session.</p>
+                    <p style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>Reports submitted anonymously can be tracked using your receipt reference code.</p>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                    {myReports.map((r) => (
+                      <div
+                        key={r.id}
+                        onClick={() => setSubmittedReport(r)}
+                        style={{
+                          padding: '0.75rem',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-subtle, #e2e8f0)',
+                          background: 'var(--bg-surface-elevated, #ffffff)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.75rem', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                            {r.reportId || `CR-${r.id.slice(0, 8).toUpperCase()}`}
+                          </span>
+                          <Badge variant="neutral">{r.status}</Badge>
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                          {r.category} &bull; {new Date(r.submittedAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            )}
           </div>
         </div>
       )}

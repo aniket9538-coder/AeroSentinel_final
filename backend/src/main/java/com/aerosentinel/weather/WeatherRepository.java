@@ -32,4 +32,6 @@ public interface WeatherRepository extends JpaRepository<WeatherObservation, UUI
     long countBySource(String source);
 
     long countByH3Index(String h3Index);
+    Optional<WeatherObservation> findFirstByOrderByObservedAtDesc();
+    List<WeatherObservation> findTop50ByCityIdOrderByObservedAtDesc(UUID cityId);
 }
