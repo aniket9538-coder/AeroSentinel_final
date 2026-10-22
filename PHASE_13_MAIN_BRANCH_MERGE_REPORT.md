@@ -28,8 +28,8 @@ The objective of this operation is to audit, verify, and safely merge the approv
 ### 2.1 Before-and-After Commit Identifiers
 | Ref / Branch | Before Merge State | After Merge State | Relationship / Role |
 | :--- | :--- | :--- | :--- |
-| **`origin/main`** | `15e199d3f3d5a15a4ccdca4267de1389de4af22f` | `83df4c65e381047fa550c660cb09aeef8cba9a61` | Remote default branch tracking verified merge |
-| **Local `main`** | `15e199d3f3d5a15a4ccdca4267de1389de4af22f` | `83df4c65e381047fa550c660cb09aeef8cba9a61` | Active working branch |
+| **`origin/main`** | `15e199d3f3d5a15a4ccdca4267de1389de4af22f` | `4e6c946` (Merge: `e2f0ded`) | Remote default branch tracking verified merge |
+| **Local `main`** | `15e199d3f3d5a15a4ccdca4267de1389de4af22f` | `4e6c946` (Merge: `e2f0ded`) | Active working branch |
 | **`origin/release/phase13-candidate`** | `2781cc4ab4c6826b10e9ed7d8430c4282201aa9f` | `2781cc4ab4c6826b10e9ed7d8430c4282201aa9f` | Preserved remote release candidate reference |
 | **Local `release/phase13-candidate`** | `2781cc4ab4c6826b10e9ed7d8430c4282201aa9f` | `2781cc4ab4c6826b10e9ed7d8430c4282201aa9f` | Preserved local release candidate reference |
 
@@ -52,7 +52,7 @@ All three commits form a linear history on `release/phase13-candidate`. Both ref
 The merge was executed via normal non-fast-forward merge (`--no-ff`) to explicitly record the merge event in Git history:
 
 ```text
-*   83df4c6 (HEAD -> main, origin/main) docs(release): add Phase 13 main branch merge report
+* 4e6c946 (HEAD -> main) docs(release): add Phase 13 main branch merge report
 *   e2f0ded merge: incorporate release/phase13-candidate into main
 |\  
 | * 2781cc4 (origin/release/phase13-candidate, release/phase13-candidate) docs(release): update verified remote HEAD commit hash
@@ -155,9 +155,9 @@ FINAL GATE VERDICT: PASS
 ================================================================================
 The AeroSentinel Release Candidate has been safely verified and merged into 'main'.
 - Target Default Branch: main
-- Merge Commit Hash: 83df4c65e381047fa550c660cb09aeef8cba9a61
+- Merge Commit Hash: e2f0ded51759bb93feef1959b3bbbb60b49cb37d
 - Pushed to Remote: https://github.com/aniket9538-coder/AeroSentinel_final.git
-- Remote 'origin/main' points to the verified merge commit.
+- Remote 'origin/main' points to the verified merge branch HEAD.
 - A standard clone of 'main' now contains the approved AeroSentinel implementation.
 ================================================================================
 ```
