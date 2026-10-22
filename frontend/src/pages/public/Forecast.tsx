@@ -142,21 +142,12 @@ export const Forecast: React.FC = () => {
   // Active preset metadata resolution
   const activePreset = PRESET_CELLS.find((c) => c.h3Index === selectedH3);
 
-  // Derive observed PM2.5 for the selected cell from verified station telemetry or verified base
+  // Derive observed PM2.5 for the selected cell from verified station telemetry only (never fabricate fallback defaults)
   const matchingStation = activePreset
     ? stations.find((s) => s.stationId === activePreset.stationId)
     : undefined;
 
-  const defaultObservedPm25Map: Record<string, number> = {
-    '88608850e5fffff': 78, // Pune Shivajinagar
-    '88608852c1fffff': 62, // Pune Katraj
-    '8860885357fffff': 89, // Pune Hadapsar
-    '88608b56b3fffff': 26, // Mumbai Kurla
-    '883da11505fffff': 25, // Delhi R K Puram
-  };
-
-  const observedPm25 =
-    matchingStation?.pm25 ?? (defaultObservedPm25Map[selectedH3] ?? (forecast?.forecasts?.[0]?.predictedPm25 ? Math.round(forecast.forecasts[0].predictedPm25) : 78));
+  const observedPm25 = matchingStation?.pm25;
 
   const handleSelectCell = (h3: string) => {
     setSelectedH3(h3);
@@ -313,7 +304,7 @@ export const Forecast: React.FC = () => {
             style={{ margin: '0.5rem auto 1.5rem auto', maxWidth: '460px', padding: '2rem 1.5rem' }}
           />
         </div>
-      ) : freshness === 'UNAVAILABLE' || forecast.status === ('UNAVAILABLE' as any) ? (
+      ) : (forecast.status === ('UNAVAILABLE' as any) && (!forecast.forecasts || forecast.forecasts.length === 0)) ? (
         <div style={{ maxWidth: '520px', margin: '0.5rem auto' }}>
           <ErrorState
             title="Forecast Telemetry Unavailable"
@@ -324,6 +315,30 @@ export const Forecast: React.FC = () => {
         </div>
       ) : (
         <>
+          {/* Archived Telemetry Warning Banner if freshness is UNAVAILABLE (>24h) */}
+          {freshness === 'UNAVAILABLE' && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.6rem',
+                padding: '0.65rem 1rem',
+                borderRadius: '8px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                color: 'var(--accent-rose, #f87171)',
+                fontSize: '0.825rem',
+                marginBottom: '1.25rem',
+              }}
+            >
+              <Clock size={16} />
+              <span>
+                <strong>Archived Forecast Telemetry (&gt;24h):</strong> Displaying persisted forecast generated on{' '}
+                {new Date(forecast.generatedAt).toLocaleDateString()} at {new Date(forecast.generatedAt).toLocaleTimeString()}. Real-time conditions may have evolved.
+              </span>
+            </div>
+          )}
+
           {/* Stale Warning Banner if applicable */}
           {freshness === 'STALE' && (
             <div
@@ -449,7 +464,7 @@ export const Forecast: React.FC = () => {
             <Card title="How this forecast is generated">
               <div style={{ fontSize: '0.825rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                 <p style={{ marginBottom: '0.75rem', color: 'var(--text-primary)' }}>
-                  Random Forest models use weather, spatial, monitoring and GIS features.
+                  Random Forest multi-horizon models use weather, spatial, monitoring and GIS features.
                 </p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.8rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.45rem 0.65rem', background: 'var(--bg-surface-elevated)', borderRadius: '6px' }}>
@@ -468,6 +483,16 @@ export const Forecast: React.FC = () => {
                     <span style={{ color: 'var(--text-muted)' }}>Bounds safeguard:</span>
                     <strong style={{ color: 'var(--brand-primary)' }}>Physical lower bound (≥ 0.0 µg/m³)</strong>
                   </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.45rem 0.65rem', background: 'var(--bg-surface-elevated)', borderRadius: '6px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Model Status:</span>
+                    <strong style={{ color: 'var(--accent-amber)' }}>Experimental ML (Baseline Comparison Disclosed)</strong>
+                  </div>
+                </div>
+                <div style={{ marginTop: '0.85rem', padding: '0.65rem', background: 'var(--bg-surface-elevated)', borderRadius: '6px', fontSize: '0.75rem', border: '1px solid var(--border-subtle)' }}>
+                  <strong style={{ color: 'var(--text-primary)' }}>Audit Benchmark Disclosure:</strong>
+                  <p style={{ margin: '0.25rem 0 0 0', color: 'var(--text-muted)' }}>
+                    In offline testing across &gt;9,000 holdout rows, a naive persistence baseline (repeating T0) outperformed the Random Forest regressor on short horizons (T+1h MAE 1.20 vs 2.97 µg/m³; T+3h MAE 3.62 vs 5.17 µg/m³; T+6h MAE 5.64 vs 6.71 µg/m³). These predictions represent experimental ML outputs for research and analysis, not certified authoritative guidance.
+                  </p>
                 </div>
               </div>
             </Card>

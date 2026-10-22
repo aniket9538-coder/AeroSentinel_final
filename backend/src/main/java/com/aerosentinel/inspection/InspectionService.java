@@ -32,6 +32,7 @@ public class InspectionService {
     private final FieldVerificationRepository fieldVerificationRepository;
     private final AlertRepository alertRepository;
     private final com.aerosentinel.event.PollutionEventRepository pollutionEventRepository;
+    private final com.aerosentinel.action.ActionRepository actionRepository;
 
     public InspectionService(
             InspectionRepository inspectionRepository,
@@ -39,7 +40,17 @@ public class InspectionService {
             FieldVerificationRepository fieldVerificationRepository,
             AlertRepository alertRepository
     ) {
-        this(inspectionRepository, fieldTeamRepository, fieldVerificationRepository, alertRepository, null);
+        this(inspectionRepository, fieldTeamRepository, fieldVerificationRepository, alertRepository, null, null);
+    }
+
+    public InspectionService(
+            InspectionRepository inspectionRepository,
+            FieldTeamRepository fieldTeamRepository,
+            FieldVerificationRepository fieldVerificationRepository,
+            AlertRepository alertRepository,
+            com.aerosentinel.event.PollutionEventRepository pollutionEventRepository
+    ) {
+        this(inspectionRepository, fieldTeamRepository, fieldVerificationRepository, alertRepository, pollutionEventRepository, null);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -49,13 +60,16 @@ public class InspectionService {
             FieldVerificationRepository fieldVerificationRepository,
             AlertRepository alertRepository,
             @org.springframework.beans.factory.annotation.Autowired(required = false)
-            com.aerosentinel.event.PollutionEventRepository pollutionEventRepository
+            com.aerosentinel.event.PollutionEventRepository pollutionEventRepository,
+            @org.springframework.beans.factory.annotation.Autowired(required = false)
+            com.aerosentinel.action.ActionRepository actionRepository
     ) {
         this.inspectionRepository = inspectionRepository;
         this.fieldTeamRepository = fieldTeamRepository;
         this.fieldVerificationRepository = fieldVerificationRepository;
         this.alertRepository = alertRepository;
         this.pollutionEventRepository = pollutionEventRepository;
+        this.actionRepository = actionRepository;
     }
 
     // =========================================================================
@@ -102,6 +116,11 @@ public class InspectionService {
      */
     @Transactional
     public InspectionResponseDto assignFieldTeam(UUID alertId, AssignTeamRequest request) {
+        return assignFieldTeam(alertId, request, null);
+    }
+
+    @Transactional
+    public InspectionResponseDto assignFieldTeam(UUID alertId, AssignTeamRequest request, String actorName) {
         if (alertId == null) {
             throw new IllegalArgumentException("Alert ID must not be null");
         }
@@ -112,10 +131,16 @@ public class InspectionService {
         Alert alert = alertRepository.findById(alertId)
                 .orElseThrow(() -> new ResourceNotFoundException("Alert not found with id: " + alertId));
 
+        // Idempotency: verify no active assignment already exists for this alert
+        Optional<Inspection> activeOpt = inspectionRepository.findActiveByAlertId(alertId);
+        if (activeOpt.isPresent()) {
+            throw new IllegalStateException("Alert already has an active field assignment: " + activeOpt.get().getId());
+        }
+
         // Lifecycle validation
         String alertStatus = alert.getStatus() != null ? alert.getStatus().toUpperCase() : "OPEN";
-        if ("RESOLVED".equals(alertStatus)) {
-            throw new IllegalStateException("Cannot assign field team to a RESOLVED alert: " + alertId);
+        if ("RESOLVED".equals(alertStatus) || "DISMISSED".equals(alertStatus)) {
+            throw new IllegalStateException("Cannot assign field team to a " + alertStatus + " alert: " + alertId);
         }
         if (!"ACKNOWLEDGED".equals(alertStatus)) {
             throw new IllegalStateException("Alert must be ACKNOWLEDGED before assigning a field team. Current status: " + alertStatus);
@@ -123,12 +148,6 @@ public class InspectionService {
 
         FieldTeam team = fieldTeamRepository.findById(request.teamId())
                 .orElseThrow(() -> new ResourceNotFoundException("Field team not found with id: " + request.teamId()));
-
-        // Idempotency: verify no active assignment already exists for this alert
-        Optional<Inspection> activeOpt = inspectionRepository.findActiveByAlertId(alertId);
-        if (activeOpt.isPresent()) {
-            throw new IllegalStateException("Alert already has an active field assignment: " + activeOpt.get().getId());
-        }
 
         Inspection inspection = new Inspection();
         inspection.setAlertId(alert.getId());
@@ -155,6 +174,12 @@ public class InspectionService {
         team.setUpdatedAt(Instant.now());
         fieldTeamRepository.save(team);
 
+        // Synchronize alert status to ASSIGNED
+        String prevAlertStatus = alert.getStatus();
+        alert.setStatus("ASSIGNED");
+        alert.setUpdatedAt(Instant.now());
+        alertRepository.save(alert);
+
         // Synchronize parent event status: OPEN -> ASSIGNED
         if (pollutionEventRepository != null && alert.getEventId() != null) {
             pollutionEventRepository.findById(alert.getEventId()).ifPresent(event -> {
@@ -169,10 +194,112 @@ public class InspectionService {
             });
         }
 
+        // Audit log in authority_actions
+        if (actionRepository != null) {
+            String actor = (actorName != null && !actorName.isBlank())
+                    ? actorName
+                    : (request.assignedBy() != null ? request.assignedBy().toString() : "Municipal Authority");
+            com.aerosentinel.action.AuthorityAction action = new com.aerosentinel.action.AuthorityAction(
+                    alert.getId(),
+                    "ASSIGNMENT",
+                    "Field team assigned: " + team.getTeamName() + (request.notes() != null && !request.notes().isBlank() ? " | Notes: " + request.notes().trim() : ""),
+                    actor,
+                    prevAlertStatus,
+                    "ASSIGNED",
+                    request.notes()
+            );
+            actionRepository.save(action);
+        }
+
         log.info("Assigned field team {} ({}) to alert {} [Event: {}, H3: {}]",
                 team.getTeamCode(), team.getTeamName(), alertId, alert.getEventId(), alert.getH3Index());
 
         return toInspectionResponseDto(inspection, team, null);
+    }
+
+    /**
+     * Reassigns an active alert assignment to a different eligible municipal field team (F7-P8).
+     * Enforces mandatory reason, releases old team to AVAILABLE, marks new team DISPATCHED,
+     * and records an auditable REASSIGNMENT action in authority_actions.
+     */
+    @Transactional
+    public InspectionResponseDto reassignFieldTeam(UUID alertId, ReassignTeamRequest request, String actorName) {
+        if (alertId == null) {
+            throw new IllegalArgumentException("Alert ID must not be null");
+        }
+        if (request == null || request.newTeamId() == null) {
+            throw new IllegalArgumentException("New Team ID must not be null");
+        }
+        if (request.reason() == null || request.reason().isBlank()) {
+            throw new com.aerosentinel.exception.ValidationException("Reassignment reason is mandatory");
+        }
+
+        Alert alert = alertRepository.findById(alertId)
+                .orElseThrow(() -> new ResourceNotFoundException("Alert not found with id: " + alertId));
+
+        String alertStatus = alert.getStatus() != null ? alert.getStatus().toUpperCase() : "OPEN";
+        if ("RESOLVED".equals(alertStatus) || "DISMISSED".equals(alertStatus)) {
+            throw new IllegalStateException("Cannot reassign field team for a " + alertStatus + " alert: " + alertId);
+        }
+
+        FieldTeam newTeam = fieldTeamRepository.findById(request.newTeamId())
+                .orElseThrow(() -> new ResourceNotFoundException("Field team not found with id: " + request.newTeamId()));
+
+        Inspection activeInspection = inspectionRepository.findActiveByAlertId(alertId)
+                .orElseThrow(() -> new IllegalStateException("No active assignment found to reassign for alert: " + alertId));
+
+        String oldTeamName = activeInspection.getAssignedTeam();
+        if (activeInspection.getTeamId() != null) {
+            fieldTeamRepository.findById(activeInspection.getTeamId()).ifPresent(oldTeam -> {
+                oldTeam.setStatus("AVAILABLE");
+                oldTeam.setUpdatedAt(Instant.now());
+                fieldTeamRepository.save(oldTeam);
+            });
+        }
+
+        activeInspection.setStatus("REASSIGNED");
+        activeInspection.setFindings("Reassigned to " + newTeam.getTeamName() + " | Reason: " + request.reason().trim());
+        activeInspection.setUpdatedAt(Instant.now());
+        inspectionRepository.saveAndFlush(activeInspection);
+
+        Inspection newInspection = new Inspection();
+        newInspection.setAlertId(alert.getId());
+        newInspection.setTeamId(newTeam.getId());
+        newInspection.setAssignedTeam(newTeam.getTeamName());
+        newInspection.setEventId(alert.getEventId());
+        newInspection.setH3Index(alert.getH3Index());
+        newInspection.setPredictionId(alert.getPredictionId());
+        newInspection.setAssignedAt(Instant.now());
+        newInspection.setScheduledAt(request.scheduledAt() != null ? request.scheduledAt() : Instant.now());
+        newInspection.setNotes(request.notes() != null && !request.notes().isBlank() ? request.notes().trim() : ("Reassigned: " + request.reason().trim()));
+        newInspection.setStatus("ASSIGNED");
+
+        newInspection = inspectionRepository.save(newInspection);
+
+        newTeam.setStatus("DISPATCHED");
+        newTeam.setUpdatedAt(Instant.now());
+        fieldTeamRepository.save(newTeam);
+
+        alert.setStatus("ASSIGNED");
+        alert.setUpdatedAt(Instant.now());
+        alertRepository.save(alert);
+
+        String actor = (actorName != null && !actorName.isBlank()) ? actorName : "Municipal Authority";
+        if (actionRepository != null) {
+            com.aerosentinel.action.AuthorityAction action = new com.aerosentinel.action.AuthorityAction(
+                    alert.getId(),
+                    "REASSIGNMENT",
+                    "Reassigned from " + oldTeamName + " to " + newTeam.getTeamName(),
+                    actor,
+                    "ASSIGNED",
+                    "ASSIGNED",
+                    request.reason().trim()
+            );
+            actionRepository.save(action);
+        }
+
+        log.info("Reassigned alert {} from {} to {} [Reason: {}]", alertId, oldTeamName, newTeam.getTeamName(), request.reason());
+        return toInspectionResponseDto(newInspection, newTeam, null);
     }
 
     // =========================================================================
@@ -184,6 +311,11 @@ public class InspectionService {
      */
     @Transactional
     public InspectionResponseDto startInspection(UUID inspectionId) {
+        return startInspection(inspectionId, null);
+    }
+
+    @Transactional
+    public InspectionResponseDto startInspection(UUID inspectionId, String actorName) {
         Inspection inspection = inspectionRepository.findById(inspectionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Inspection not found with id: " + inspectionId));
 
@@ -200,6 +332,15 @@ public class InspectionService {
             inspection = savedInspection;
         }
 
+        // Synchronize parent alert status: ASSIGNED -> IN_INSPECTION
+        if (inspection.getAlertId() != null) {
+            alertRepository.findById(inspection.getAlertId()).ifPresent(alert -> {
+                alert.setStatus("IN_INSPECTION");
+                alert.setUpdatedAt(Instant.now());
+                alertRepository.save(alert);
+            });
+        }
+
         // Synchronize parent event status: ASSIGNED -> IN_INSPECTION
         if (pollutionEventRepository != null && inspection.getEventId() != null) {
             pollutionEventRepository.findById(inspection.getEventId()).ifPresent(event -> {
@@ -212,6 +353,22 @@ public class InspectionService {
                 pollutionEventRepository.save(event);
                 log.info("Synchronized PollutionEvent id={} status to IN_INSPECTION", event.getId());
             });
+        }
+
+        if (actionRepository != null && inspection.getAlertId() != null) {
+            String actor = (actorName != null && !actorName.isBlank())
+                    ? actorName
+                    : (inspection.getAssignedTeam() != null ? inspection.getAssignedTeam() : "Municipal Authority");
+            com.aerosentinel.action.AuthorityAction action = new com.aerosentinel.action.AuthorityAction(
+                    inspection.getAlertId(),
+                    "FIELD_INSPECTION_STARTED",
+                    "Field inspection initiated by team " + inspection.getAssignedTeam(),
+                    actor,
+                    "ASSIGNED",
+                    "IN_INSPECTION",
+                    inspection.getNotes()
+            );
+            actionRepository.save(action);
         }
 
         log.info("Started inspection {} for alert {}", inspectionId, inspection.getAlertId());
@@ -242,6 +399,11 @@ public class InspectionService {
      */
     @Transactional
     public InspectionResponseDto submitVerification(UUID inspectionId, SubmitVerificationRequest request) {
+        return submitVerification(inspectionId, request, null);
+    }
+
+    @Transactional
+    public InspectionResponseDto submitVerification(UUID inspectionId, SubmitVerificationRequest request, String actorName) {
         if (inspectionId == null) {
             throw new IllegalArgumentException("Inspection ID must not be null");
         }
@@ -311,8 +473,25 @@ public class InspectionService {
             });
         }
 
+        if (actionRepository != null && inspection.getAlertId() != null) {
+            String actor = (actorName != null && !actorName.isBlank())
+                    ? actorName
+                    : (request.verifiedBy() != null ? request.verifiedBy() : inspection.getAssignedTeam());
+            com.aerosentinel.action.AuthorityAction action = new com.aerosentinel.action.AuthorityAction(
+                    inspection.getAlertId(),
+                    "FIELD_VERIFICATION",
+                    "Field verification recorded: " + result + " | Observed: " + request.observedConditions().trim(),
+                    actor,
+                    "IN_INSPECTION",
+                    "IN_INSPECTION",
+                    request.inspectorNotes()
+            );
+            actionRepository.save(action);
+        }
+
         log.info("Completed field verification {} for inspection {} [Result: {}, Alert: {}, H3: {}]",
                 verification.getId(), inspectionId, result, inspection.getAlertId(), inspection.getH3Index());
+
 
         FieldTeam team = inspection.getTeamId() != null
                 ? fieldTeamRepository.findById(inspection.getTeamId()).orElse(null)

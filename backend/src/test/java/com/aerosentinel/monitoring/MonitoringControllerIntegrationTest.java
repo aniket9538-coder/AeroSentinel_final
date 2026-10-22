@@ -26,8 +26,21 @@ class MonitoringControllerIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private com.aerosentinel.hotspot.HotspotRepository hotspotRepository;
+
+    @Autowired
+    private com.aerosentinel.forecast.ForecastRepository forecastRepository;
+
+    @Autowired
+    private com.aerosentinel.grid.GridService gridService;
+
+    @Autowired
+    private com.aerosentinel.feature.FeatureSnapshotRepository featureSnapshotRepository;
+
     private static final UUID PUNE_CITY_ID = UUID.fromString("550e8400-e29b-41d4-a716-446655440001");
     private static final UUID MUMBAI_CITY_ID = UUID.fromString("550e8400-e29b-41d4-a716-446655440002");
+    private static final UUID UNMONITORED_CITY_ID = UUID.fromString("550e8400-e29b-41d4-a716-446655440999");
 
     // Real Pune seeded H3 cell around Shivajinagar
     private static final String PUNE_SHIVAJINAGAR_H3 = "88608850e5fffff";
@@ -37,6 +50,91 @@ class MonitoringControllerIntegrationTest {
     private static final String PUNE_HADAPSAR_H3 = "8860885357fffff";
     // Distant valid H3 in Pune region (> 7 km from all 3 central stations)
     private static final String PUNE_DISTANT_H3 = "8860884119fffff";
+
+    private static boolean seeded = false;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUpData() {
+        if (seeded) return;
+        seeded = true;
+
+        var cellShivajinagar = gridService.getOrCreateGridCell(PUNE_SHIVAJINAGAR_H3, PUNE_CITY_ID);
+        var cellKatraj = gridService.getOrCreateGridCell(PUNE_KATRAJ_H3, PUNE_CITY_ID);
+        var cellDistant = gridService.getOrCreateGridCell(PUNE_DISTANT_H3, PUNE_CITY_ID);
+
+        java.time.Instant future = java.time.Instant.now().plus(java.time.Duration.ofDays(30));
+
+        var snap = new com.aerosentinel.feature.FeatureSnapshot();
+        snap.setCityId(PUNE_CITY_ID);
+        snap.setH3Index(PUNE_SHIVAJINAGAR_H3);
+        snap.setObservedAt(future);
+        snap.setFeatures("{}");
+        snap = featureSnapshotRepository.save(snap);
+        UUID snapId = snap.getId();
+
+        // Shivajinagar
+        var pA = new com.aerosentinel.hotspot.HotspotPrediction();
+        pA.setCityId(PUNE_CITY_ID);
+        pA.setH3Index(PUNE_SHIVAJINAGAR_H3);
+        pA.setGridCellId(cellShivajinagar.getId());
+        pA.setFeatureSnapshotId(snapId);
+        pA.setRiskScore(0.15);
+        pA.setRiskLevel("LOW");
+        pA.setConfidence(0.85);
+        pA.setModelVersion("hotspot_classifier_v1");
+        pA.setExplanationStatus("COMPLETED");
+        pA.setPredictedAt(future);
+        pA = hotspotRepository.save(pA);
+
+        var fA = new com.aerosentinel.forecast.Forecast(
+                pA.getId(), PUNE_CITY_ID, PUNE_SHIVAJINAGAR_H3, cellShivajinagar.getId(), snapId,
+                future, future.plus(1, java.time.temporal.ChronoUnit.HOURS), 1,
+                28.0, 23.0, 33.0, null, "forecast_regressors_v1", "ug/m3", "SUCCESS"
+        );
+        forecastRepository.save(fA);
+
+        // Katraj
+        var pB = new com.aerosentinel.hotspot.HotspotPrediction();
+        pB.setCityId(PUNE_CITY_ID);
+        pB.setH3Index(PUNE_KATRAJ_H3);
+        pB.setGridCellId(cellKatraj.getId());
+        pB.setFeatureSnapshotId(snapId);
+        pB.setRiskScore(0.58);
+        pB.setRiskLevel("MEDIUM");
+        pB.setConfidence(0.70);
+        pB.setModelVersion("hotspot_classifier_v1");
+        pB.setExplanationStatus("COMPLETED");
+        pB.setPredictedAt(future);
+        pB = hotspotRepository.save(pB);
+
+        var fB = new com.aerosentinel.forecast.Forecast(
+                pB.getId(), PUNE_CITY_ID, PUNE_KATRAJ_H3, cellKatraj.getId(), snapId,
+                future, future.plus(1, java.time.temporal.ChronoUnit.HOURS), 1,
+                68.0, 60.5, 75.5, null, "forecast_regressors_v1", "ug/m3", "SUCCESS"
+        );
+        forecastRepository.save(fB);
+
+        // Distant
+        var pC = new com.aerosentinel.hotspot.HotspotPrediction();
+        pC.setCityId(PUNE_CITY_ID);
+        pC.setH3Index(PUNE_DISTANT_H3);
+        pC.setGridCellId(cellDistant.getId());
+        pC.setFeatureSnapshotId(snapId);
+        pC.setRiskScore(0.88);
+        pC.setRiskLevel("HIGH");
+        pC.setConfidence(0.90);
+        pC.setModelVersion("hotspot_classifier_v1");
+        pC.setExplanationStatus("COMPLETED");
+        pC.setPredictedAt(future);
+        pC = hotspotRepository.save(pC);
+
+        var fC = new com.aerosentinel.forecast.Forecast(
+                pC.getId(), PUNE_CITY_ID, PUNE_DISTANT_H3, cellDistant.getId(), snapId,
+                future, future.plus(1, java.time.temporal.ChronoUnit.HOURS), 1,
+                135.0, 125.0, 145.0, null, "forecast_regressors_v1", "ug/m3", "SUCCESS"
+        );
+        forecastRepository.save(fC);
+    }
 
     @Test
     @Order(1)
@@ -116,7 +214,7 @@ class MonitoringControllerIntegrationTest {
     @DisplayName("6. City with no active stations (Mumbai) returns safe no-coverage response without fake station or zero distance")
     void testGetCoverageCityWithNoStations() throws Exception {
         mockMvc.perform(get("/api/v1/monitoring/coverage/{h3Index}", PUNE_SHIVAJINAGAR_H3)
-                        .param("cityId", MUMBAI_CITY_ID.toString())
+                        .param("cityId", UNMONITORED_CITY_ID.toString())
                         .contentType(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.h3Index").value(PUNE_SHIVAJINAGAR_H3))

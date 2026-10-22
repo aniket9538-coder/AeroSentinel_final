@@ -65,3 +65,10 @@ export interface SubmitVerificationRequest {
   verifiedBy?: string | null;
   inspectedAt?: string | null;
 }
+
+export interface ReassignTeamRequest {
+  newTeamId: string;
+  reason: string;
+  scheduledAt?: string | null;
+  notes?: string | null;
+}

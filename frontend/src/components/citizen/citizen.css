@@ -1,0 +1,830 @@
+/* ==========================================================================
+   AeroSentinel Citizen Portal Styles — Phase 5
+   Accessible, Responsive, Climate-Tech Visual Design System
+   ========================================================================== */
+
+/* Citizen Layout Shell */
+.citizen-portal-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Atmospheric Ambient Background */
+.citizen-ambient-glow {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100vw;
+  height: 380px;
+  background: radial-gradient(ellipse at 50% 0%, rgba(56, 189, 248, 0.12) 0%, rgba(6, 182, 212, 0.04) 50%, transparent 80%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Top Navbar */
+.citizen-navbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  background: rgba(17, 29, 53, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-subtle);
+  transition: all 0.2s ease;
+}
+
+[data-theme="light"] .citizen-navbar {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.citizen-nav-left {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.citizen-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+
+.citizen-brand-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #0284c7 0%, #06b6d4 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35);
+}
+
+.citizen-brand-titles {
+  display: flex;
+  flex-direction: column;
+}
+
+.citizen-brand-name {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  font-size: 1.05rem;
+  letter-spacing: 0.05em;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.citizen-brand-portal-tag {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--brand-primary);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* Citizen Nav Links (Desktop) */
+.citizen-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.citizen-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.8rem;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.citizen-nav-link:hover {
+  color: var(--text-primary);
+  background: var(--bg-glass);
+}
+
+.citizen-nav-link.active {
+  color: var(--brand-primary);
+  background: var(--brand-surface);
+  border: 1px solid var(--brand-border);
+}
+
+/* Citizen Nav Right Actions */
+.citizen-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.citizen-location-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.42rem 0.85rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: 20px;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.citizen-location-btn:hover {
+  border-color: var(--brand-primary);
+  background: var(--bg-surface-elevated);
+}
+
+.citizen-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.citizen-icon-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--border-medium);
+}
+
+.citizen-lang-select {
+  padding: 0.38rem 0.65rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.citizen-command-center-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.42rem 0.85rem;
+  background: rgba(14, 165, 233, 0.12);
+  border: 1px solid rgba(14, 165, 233, 0.3);
+  border-radius: 8px;
+  color: var(--brand-primary);
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.citizen-command-center-btn:hover {
+  background: rgba(14, 165, 233, 0.22);
+}
+
+/* Mobile Hamburger */
+.citizen-mobile-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+/* Mobile Navigation Drawer */
+.citizen-mobile-drawer {
+  display: none;
+  flex-direction: column;
+  padding: 1rem 1.25rem;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-medium);
+  gap: 0.5rem;
+}
+
+.citizen-mobile-drawer.open {
+  display: flex;
+}
+
+/* Main Citizen Content Area */
+.citizen-main-content {
+  flex: 1;
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 3rem;
+  position: relative;
+  z-index: 1;
+}
+
+/* Citizen Header Banner */
+.citizen-hero-banner {
+  margin-bottom: 1.75rem;
+}
+
+.citizen-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 20px;
+  background: var(--brand-surface);
+  border: 1px solid var(--brand-border);
+  color: var(--brand-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 0.65rem;
+}
+
+.citizen-hero-title {
+  font-family: var(--font-heading);
+  font-size: 1.85rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.2;
+  margin-bottom: 0.4rem;
+}
+
+.citizen-hero-sub {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  max-width: 720px;
+  line-height: 1.5;
+}
+
+/* Dashboard Grid Layout */
+.citizen-grid-container {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 1.25rem;
+}
+
+.citizen-col-12 { grid-column: span 12; }
+.citizen-col-8 { grid-column: span 8; }
+.citizen-col-7 { grid-column: span 7; }
+.citizen-col-6 { grid-column: span 6; }
+.citizen-col-5 { grid-column: span 5; }
+.citizen-col-4 { grid-column: span 4; }
+
+/* Citizen Card Standard */
+.citizen-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  padding: 1.35rem;
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.citizen-card:hover {
+  border-color: var(--border-medium);
+  box-shadow: var(--shadow-md);
+}
+
+.citizen-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.75rem;
+}
+
+.citizen-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.citizen-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--brand-surface);
+  color: var(--brand-primary);
+}
+
+.citizen-card-title {
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.citizen-card-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.badge-live {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.badge-stale {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-unavailable {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.badge-experimental {
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.badge-info {
+  background: var(--brand-surface);
+  color: var(--brand-primary);
+  border: 1px solid var(--brand-border);
+}
+
+/* Metric Highlight Numbers */
+.citizen-metric-primary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.citizen-metric-val {
+  font-family: var(--font-heading);
+  font-size: 2.5rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.citizen-metric-unit {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.citizen-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.75rem;
+}
+
+.citizen-metric-item {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.citizen-metric-item-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.citizen-metric-item-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Source Provenance Footer in Card */
+.citizen-source-provenance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.citizen-source-link {
+  color: var(--brand-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.citizen-source-link:hover {
+  color: var(--brand-hover);
+}
+
+/* Official Warnings List */
+.citizen-warning-item {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 10px;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.citizen-warning-item.severity-orange {
+  background: rgba(249, 115, 22, 0.08);
+  border-color: rgba(249, 115, 22, 0.25);
+}
+
+.citizen-warning-item.severity-yellow {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.citizen-warning-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.citizen-warning-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+/* Forecast Timeline Visual */
+.citizen-forecast-scroll {
+  display: flex;
+  gap: 0.65rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+  scrollbar-width: thin;
+}
+
+.citizen-forecast-hour-card {
+  flex: 0 0 95px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 0.75rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: center;
+}
+
+.citizen-forecast-hour-time {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.citizen-forecast-hour-temp {
+  font-family: var(--font-heading);
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.citizen-forecast-hour-rain {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #38bdf8;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+/* Quick Assistant Bar */
+.citizen-quick-assistant {
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.1) 0%, rgba(6, 182, 212, 0.05) 100%);
+  border: 1px solid var(--brand-border);
+  border-radius: 16px;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.citizen-quick-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.citizen-quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.citizen-quick-chip {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-medium);
+  border-radius: 20px;
+  padding: 0.45rem 0.9rem;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.citizen-quick-chip:hover {
+  background: var(--brand-surface);
+  border-color: var(--brand-primary);
+  color: var(--brand-primary);
+  transform: translateY(-1px);
+}
+
+/* Dedicated Assistant Chat Layout */
+.citizen-chat-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 160px);
+  min-height: 520px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+.citizen-chat-header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.citizen-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  scroll-behavior: smooth;
+}
+
+.citizen-message {
+  display: flex;
+  flex-direction: column;
+  max-width: 82%;
+  gap: 0.35rem;
+}
+
+.citizen-message.user {
+  align-self: flex-end;
+}
+
+.citizen-message.assistant {
+  align-self: flex-start;
+}
+
+.citizen-bubble {
+  padding: 0.9rem 1.15rem;
+  border-radius: 16px;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.citizen-message.user .citizen-bubble {
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  border-bottom-right-radius: 4px;
+}
+
+.citizen-message.assistant .citizen-bubble {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-bottom-left-radius: 4px;
+}
+
+.citizen-sources-panel {
+  margin-top: 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.citizen-source-card {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.78rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.citizen-chat-input-bar {
+  padding: 1rem 1.25rem;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+}
+
+.citizen-chat-textarea {
+  flex: 1;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-medium);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  resize: none;
+  max-height: 120px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.citizen-chat-textarea:focus {
+  border-color: var(--brand-primary);
+}
+
+.citizen-chat-send-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--brand-primary);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.citizen-chat-send-btn:hover:not(:disabled) {
+  background: var(--brand-hover);
+  transform: translateY(-1px);
+}
+
+.citizen-chat-send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Rate Limit Banner */
+.citizen-rate-limit-banner {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #f59e0b;
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+}
+
+/* Responsive Media Queries */
+@media (max-width: 1024px) {
+  .citizen-col-8, .citizen-col-7, .citizen-col-6, .citizen-col-5, .citizen-col-4 {
+    grid-column: span 12;
+  }
+  .citizen-nav-links {
+    display: none;
+  }
+  .citizen-mobile-menu-btn {
+    display: flex;
+  }
+}
+
+@media (max-width: 640px) {
+  .citizen-navbar {
+    padding: 0.5rem 0.5rem;
+    gap: 0.25rem;
+  }
+  .citizen-nav-left {
+    gap: 0.35rem;
+  }
+  .citizen-brand-badge {
+    width: 28px;
+    height: 28px;
+  }
+  .citizen-brand-badge svg {
+    width: 16px;
+    height: 16px;
+  }
+  .citizen-brand-portal-tag {
+    display: none;
+  }
+  .citizen-brand-name {
+    font-size: 0.88rem;
+  }
+  .citizen-nav-right {
+    gap: 0.2rem;
+  }
+  .citizen-command-center-btn {
+    display: none;
+  }
+  .citizen-lang-select {
+    padding: 0.25rem 0.15rem;
+    font-size: 0.7rem;
+    max-width: 58px;
+  }
+  .citizen-location-btn {
+    padding: 0.3rem 0.45rem;
+  }
+  .citizen-location-btn span {
+    max-width: 38px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.74rem;
+  }
+  .citizen-icon-btn {
+    width: 28px;
+    height: 28px;
+  }
+  .citizen-mobile-menu-btn {
+    width: 28px;
+    height: 28px;
+  }
+  .citizen-main-content {
+    padding: 1rem 0.75rem 2.5rem;
+  }
+  .citizen-hero-title {
+    font-size: 1.45rem;
+  }
+  .citizen-metric-val {
+    font-size: 2rem;
+  }
+  .citizen-chat-container {
+    height: calc(100vh - 120px);
+    border-radius: 12px;
+  }
+  .citizen-message {
+    max-width: 95%;
+  }
+}

@@ -9,6 +9,7 @@ import {
   Shield,
   User,
   Check,
+  Compass,
 } from 'lucide-react';
 import { useApp } from '../../store/AppContext';
 
@@ -107,6 +108,33 @@ export const OnboardingHeader: React.FC = () => {
 
       {/* Right: Actions */}
       <div className="onboarding-header-actions">
+        {/* Citizen Portal Entry Button */}
+        <button
+          className="onboarding-citizen-pill"
+          onClick={() => navigate('/citizen')}
+          type="button"
+          title="Open Dedicated Citizen Portal"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.45rem',
+            padding: '0.42rem 0.9rem',
+            background: 'linear-gradient(135deg, #0284c7 0%, #06b6d4 100%)',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: '20px',
+            fontWeight: 700,
+            fontSize: '0.82rem',
+            cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(2, 132, 199, 0.35)',
+            transition: 'all 0.15s ease',
+          }}
+          id="header-citizen-portal-btn"
+        >
+          <Compass size={14} strokeWidth={2.4} />
+          <span>Citizen Portal</span>
+        </button>
+
         {/* System Status */}
         <div className="onboarding-status-pill">
           <span className="onboarding-status-dot" />

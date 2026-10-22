@@ -27,9 +27,10 @@ from federated.models.local_model import FEATURE_COUNT
 
 @pytest.fixture(scope="module")
 def client() -> FederatedNetworkClient:
-    """Fixture providing initialized network client connected to control plane."""
+    """Fixture providing initialized network client connected to control plane with Admin auth."""
     client = FederatedNetworkClient(base_url="http://localhost:8080", timeout=10.0)
     assert client.check_health(), "Spring Boot control plane is not reachable on http://localhost:8080"
+    client.login("admin@aerosentinel.gov", "password")
     return client
 
 
@@ -37,6 +38,26 @@ class TestFederatedCrossStackOrchestration:
     """
     Integration test suite for cross-stack federated control plane communication.
     """
+
+    def test_00_unauthenticated_mutation_rejected_with_401(self):
+        """
+        Verifies unauthenticated POST to federated control plane is strictly rejected with HTTP 401.
+        """
+        anon_client = FederatedNetworkClient(base_url="http://localhost:8080", timeout=10.0)
+        assert anon_client.check_health() is True
+        # Anonymous GET is permitted
+        nodes = anon_client.list_nodes()
+        assert len(nodes) >= 3
+
+        # Anonymous POST must fail closed with HTTP 401
+        with pytest.raises(FederatedNetworkError) as exc_info:
+            anon_client.create_round(
+                round_id=f"ANON-R-{uuid.uuid4().hex[:6].upper()}",
+                base_model_version="global-v1",
+                participating_nodes=["PUNE", "MUMBAI"],
+                min_quorum=2,
+            )
+        assert exc_info.value.status_code == 401
 
     def test_01_backend_healthcheck(self, client: FederatedNetworkClient):
         """

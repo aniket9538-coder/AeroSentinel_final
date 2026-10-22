@@ -79,6 +79,24 @@ public class ModelUpdateService {
             throw new ValidationException("sampleCount must be strictly greater than 0");
         }
 
+        // 5. Parameter weights validation (dimension & poisoning check)
+        if (request.weights() != null && !request.weights().isEmpty()) {
+            if (request.weights().size() != 37) {
+                throw new ValidationException(String.format(
+                        "Parameter weights dimension mismatch: expected 37 parameters (36 features + intercept) for f3-features-v1, received %d",
+                        request.weights().size()
+                ));
+            }
+            for (Double w : request.weights()) {
+                if (w == null || !Double.isFinite(w)) {
+                    throw new ValidationException("Parameter weights must be finite numerical values (no NaN or Inf)");
+                }
+                if (Math.abs(w) > 100000.0) {
+                    throw new ValidationException("Parameter update exceeds allowable bounds (possible parameter poisoning): " + w);
+                }
+            }
+        }
+
         String weightsJson = null;
         if (request.weights() != null && !request.weights().isEmpty()) {
             try {

@@ -21,4 +21,12 @@ public class WeatherController {
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
+
+    @GetMapping("/history")
+    public ResponseEntity<java.util.List<WeatherObservation>> getWeatherHistory(
+            @RequestParam UUID cityId,
+            @RequestParam(required = false, defaultValue = "50") Integer limit
+    ) {
+        return ResponseEntity.ok(weatherService.getWeatherHistory(cityId, limit));
+    }
 }

@@ -39,10 +39,38 @@ import { FederatedNetwork } from './pages/federated/FederatedNetwork';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { F3ForecastContinuityBridge } from './components/forecasting/F3ForecastContinuityBridge';
 
+// Citizen Portal Pages (Phase 5)
+import { CitizenLayout } from './components/citizen/CitizenLayout';
+import { CitizenOverview } from './pages/citizen/CitizenOverview';
+import { CitizenAssistantPage } from './pages/citizen/CitizenAssistantPage';
+import { CitizenWeatherPage } from './pages/citizen/CitizenWeatherPage';
+import { CitizenAirQualityPage } from './pages/citizen/CitizenAirQualityPage';
+import { CitizenWarningsPage } from './pages/citizen/CitizenWarningsPage';
+
 const AppLayout: React.FC = () => {
   const location = useLocation();
   const { sidebarOpen } = useApp();
   const isOnboarding = location.pathname === '/' || location.pathname === '/home';
+  const isCitizenPortal = location.pathname.startsWith('/citizen');
+
+  // If in dedicated Citizen Portal, render with distinct Citizen Layout & Navigation
+  if (isCitizenPortal) {
+    return (
+      <CitizenLayout>
+        <Routes>
+          <Route path="/citizen" element={<CitizenOverview />} />
+          <Route path="/citizen/overview" element={<CitizenOverview />} />
+          <Route path="/citizen/assistant" element={<CitizenAssistantPage />} />
+          <Route path="/citizen/weather" element={<CitizenWeatherPage />} />
+          <Route path="/citizen/air-quality" element={<CitizenAirQualityPage />} />
+          <Route path="/citizen/warnings" element={<CitizenWarningsPage />} />
+          <Route path="/citizen/report" element={<CitizenReport />} />
+          <Route path="/citizen/report/:reportId" element={<CitizenReport />} />
+          <Route path="/citizen/*" element={<Navigate to="/citizen" replace />} />
+        </Routes>
+      </CitizenLayout>
+    );
+  }
 
   return (
     <div className={`app-shell ${isOnboarding ? 'onboarding-shell' : ''}`}>
@@ -107,8 +135,10 @@ const AppLayout: React.FC = () => {
             <Route path="/admin/cities" element={<CitiesPage />} />
             <Route path="/admin/status" element={<SystemStatus />} />
 
-            {/* Federated Prototype */}
+            {/* Federated Prototype & Aliases */}
             <Route path="/federated" element={<FederatedNetwork />} />
+            <Route path="/federated-network" element={<FederatedNetwork />} />
+            <Route path="/authority/federated-network" element={<FederatedNetwork />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />

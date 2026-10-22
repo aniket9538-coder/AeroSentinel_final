@@ -7,6 +7,7 @@ import {
   CreateRoundRequest,
   NodeHeartbeatRequest,
   AggregationResponse,
+  EvaluationComparison,
 } from '../types';
 
 export const federatedService = {
@@ -87,6 +88,26 @@ export const federatedService = {
    */
   getModelCatalog: async (): Promise<GlobalModel[]> => {
     const response = await apiClient.get<GlobalModel[]>('/federated/models/catalog');
+    return response.data;
+  },
+
+  /**
+   * Triggers genuine local training execution for participating municipal nodes in a round.
+   */
+  simulateRound: async (roundId: string): Promise<Record<string, any>> => {
+    const response = await apiClient.post<Record<string, any>>(
+      `/federated/rounds/${roundId}/simulate-round`
+    );
+    return response.data;
+  },
+
+  /**
+   * Retrieves held-out baseline cross-city evaluation metrics for a global model version.
+   */
+  getEvaluation: async (version: string): Promise<EvaluationComparison> => {
+    const response = await apiClient.get<EvaluationComparison>(
+      `/federated/models/${version}/evaluation`
+    );
     return response.data;
   },
 };

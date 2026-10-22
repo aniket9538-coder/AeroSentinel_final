@@ -69,12 +69,36 @@ export const CityNodeCard: React.FC<CityNodeCardProps> = ({ node, onHeartbeat })
                 {node.modelVersion || 'None'}
               </span>
             </div>
+            <div style={{ marginTop: '0.35rem' }}>
+              <span
+                style={{
+                  fontSize: '0.62rem',
+                  fontWeight: 600,
+                  letterSpacing: '0.04em',
+                  padding: '0.12rem 0.4rem',
+                  borderRadius: '4px',
+                  background: nodeId === 'PUNE' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                  color: nodeId === 'PUNE' ? '#60a5fa' : '#fbbf24',
+                  border: `1px solid ${nodeId === 'PUNE' ? 'rgba(59, 130, 246, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+                }}
+              >
+                {nodeId === 'PUNE' ? 'LOCAL TEST FIXTURE' : (nodeId === 'MUMBAI' || nodeId === 'DELHI') ? 'SIMULATED - TEST FIXTURE' : 'REGISTERED NODE'}
+              </span>
+            </div>
           </div>
         </div>
 
         <Badge variant={statusCfg.variant} size="sm" pulse={statusCfg.pulse}>
           {statusCfg.label}
         </Badge>
+      </div>
+
+      <div style={{ marginTop: '0.6rem', fontSize: '0.72rem', color: '#9ca3af', lineHeight: 1.35, background: 'rgba(255,255,255,0.02)', padding: '0.4rem 0.6rem', borderRadius: '6px' }}>
+        {nodeId === 'PUNE'
+          ? 'Pune Municipal Node: Local test fixture. Authorized F3 feature domain (1,200 local samples).'
+          : (nodeId === 'MUMBAI' || nodeId === 'DELHI')
+            ? `${node.nodeName}: Synthetic municipal test fixture. No remote connection; simulated local updates.`
+            : 'Municipal participant node.'}
       </div>
 
       <div

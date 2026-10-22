@@ -110,3 +110,24 @@ export interface FederatedOverviewStats {
   totalTelemetrySamples: number;
   systemHealth: 'HEALTHY' | 'DEGRADED' | 'CRITICAL';
 }
+
+export interface EvaluationComparison {
+  modelVersion: string;
+  baselineName?: string;
+  baseModelVersion?: string;
+  featureSchemaVersion?: string;
+  parameterCount?: number;
+  testSampleCount: number;
+  testSampleSize?: number;
+  globalMetrics: EvaluationMetrics;
+  localBaselineMetrics: EvaluationMetrics;
+  puneLocalMetrics?: EvaluationMetrics;
+  naiveBaselineMetrics: EvaluationMetrics;
+  generalizationDeltaMae?: number;
+  generalizationDeltaRmse?: number;
+  evaluationDatasetProvenance?: string;
+  geographicValidityNotice: string;
+  domainLimitationNote?: string;
+  evaluatedAt: string;
+  evaluationTimestamp?: string;
+}

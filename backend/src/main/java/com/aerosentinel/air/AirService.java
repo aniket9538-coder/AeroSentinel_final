@@ -14,10 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -136,5 +133,94 @@ public class AirService {
 
     public AirObservation saveObservation(AirObservation observation) {
         return airObservationRepository.save(observation);
+    }
+
+    /**
+     * Phase 10: Grounded Historical Air Quality Trends.
+     * Computes genuine timestamped trend data without synthetic or interpolated records.
+     */
+    public com.aerosentinel.dto.air.AirQualityTrendResponse getAirQualityTrends(UUID cityId, String stationCode, Integer limit) {
+        City city = cityRepository.findById(cityId)
+                .orElseThrow(() -> new ResourceNotFoundException("City not found with id: " + cityId));
+
+        List<AirObservation> rawObservations;
+        String resolvedStationCode = stationCode;
+        String resolvedStationName = null;
+
+        if (stationCode != null && !stationCode.isBlank()) {
+            rawObservations = airObservationRepository.findTop100ByStationIdOrderByObservedAtDesc(stationCode.trim());
+            Optional<MonitoringStation> stOpt = sensorRepository.findByStationCode(stationCode.trim());
+            if (stOpt.isPresent()) {
+                resolvedStationName = stOpt.get().getName();
+            }
+        } else {
+            rawObservations = airObservationRepository.findTop100ByCityIdOrderByObservedAtDesc(cityId);
+            if (!rawObservations.isEmpty()) {
+                resolvedStationCode = rawObservations.get(0).getStationId();
+                Optional<MonitoringStation> stOpt = sensorRepository.findByStationCode(resolvedStationCode);
+                resolvedStationName = stOpt.map(MonitoringStation::getName).orElse(resolvedStationCode);
+            }
+        }
+
+        if (rawObservations.isEmpty()) {
+            return new com.aerosentinel.dto.air.AirQualityTrendResponse(
+                    city.getId(),
+                    city.getName(),
+                    resolvedStationCode,
+                    resolvedStationName,
+                    List.of(),
+                    new com.aerosentinel.dto.air.AirQualityTrendResponse.TrendSummary(null, null, null, null, 0, "NO_DATA"),
+                    "No historical air quality observations recorded for this location. Synthetic data is strictly omitted."
+            );
+        }
+
+        // Sort chronologically ascending for time-series charts
+        List<AirObservation> sortedObservations = new ArrayList<>(rawObservations);
+        sortedObservations.sort(Comparator.comparing(AirObservation::getObservedAt));
+
+        List<com.aerosentinel.dto.air.AirQualityTrendResponse.TrendPoint> points = sortedObservations.stream()
+                .map(o -> new com.aerosentinel.dto.air.AirQualityTrendResponse.TrendPoint(
+                        o.getObservedAt(),
+                        o.getPm25(),
+                        o.getPm10(),
+                        o.getAqi(),
+                        o.getSource() != null ? o.getSource() : "CPCB",
+                        o.getDataQuality() != null ? o.getDataQuality() : "VALID"
+                ))
+                .collect(Collectors.toList());
+
+        // Calculate summary statistics
+        DoubleSummaryStatistics stats = rawObservations.stream()
+                .map(AirObservation::getPm25)
+                .filter(Objects::nonNull)
+                .mapToDouble(Double::doubleValue)
+                .summaryStatistics();
+
+        Double min = stats.getCount() > 0 ? stats.getMin() : null;
+        Double max = stats.getCount() > 0 ? stats.getMax() : null;
+        Double avg = stats.getCount() > 0 ? Math.round(stats.getAverage() * 10.0) / 10.0 : null;
+        Double latest = points.get(points.size() - 1).pm25();
+
+        String trendDirection = "STABLE";
+        if (points.size() >= 2) {
+            Double first = points.get(0).pm25();
+            if (first != null && latest != null) {
+                double delta = latest - first;
+                if (delta > 5.0) trendDirection = "DETERIORATING";
+                else if (delta < -5.0) trendDirection = "IMPROVING";
+            }
+        }
+
+        String note = "Historical trend derived strictly from actual station telemetry. Gaps reflect actual provider observation intervals without synthetic points.";
+
+        return new com.aerosentinel.dto.air.AirQualityTrendResponse(
+                city.getId(),
+                city.getName(),
+                resolvedStationCode,
+                resolvedStationName,
+                points,
+                new com.aerosentinel.dto.air.AirQualityTrendResponse.TrendSummary(min, max, avg, latest, points.size(), trendDirection),
+                note
+        );
     }
 }

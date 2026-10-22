@@ -23,14 +23,14 @@
       "algorithm": "CalibratedClassifierCV (Platt Sigmoid) on Balanced RandomForestClassifier",
       "target_proxy": "pm25_clean >= 60.0 ug/m3 with spatial lag anomaly ratio >= 1.15",
       "calibration_method": "sigmoid",
-      "roc_auc": 0.9714,
-      "pr_auc": 0.7982,
-      "brier_score": 0.1128,
+      "roc_auc": 0.9941,
+      "pr_auc": 0.9629,
+      "brier_score": 0.0384,
       "operational_decision_threshold": 0.20,
       "metrics_at_operational_threshold": {
-        "precision": 1.000,
-        "recall": 0.016,
-        "f1_score": 0.032
+        "precision": 0.7857,
+        "recall": 0.9711,
+        "f1_score": 0.8686
       },
       "baseline_comparison": {
         "model": "Logistic Regression (Balanced)",
@@ -48,29 +48,29 @@
       ],
       "metrics": {
         "T+1h": {
-          "mae": 1.73,
-          "rmse": 3.88,
-          "r2": 0.9664,
+          "mae": 2.97,
+          "rmse": 5.84,
+          "r2": 0.9240,
           "prediction_interval_residuals": {"p10": -2.41, "p90": 2.15}
         },
         "T+3h": {
-          "mae": 3.98,
-          "rmse": 8.66,
-          "r2": 0.8326,
+          "mae": 5.17,
+          "rmse": 11.03,
+          "r2": 0.7294,
           "prediction_interval_residuals": {"p10": -5.12, "p90": 4.88}
         },
         "T+6h": {
-          "mae": 6.37,
-          "rmse": 13.55,
-          "r2": 0.5901,
+          "mae": 6.71,
+          "rmse": 9.84,
+          "r2": 0.7854,
           "prediction_interval_residuals": {"p10": -9.34, "p90": 8.76}
         }
       },
       "baselines": {
         "naive_persistence": {
-          "T+1h": {"mae": 1.35, "rmse": 3.69, "r2": 0.9696},
-          "T+3h": {"mae": 3.85, "rmse": 6.67, "r2": 0.9007},
-          "T+6h": {"mae": 5.90, "rmse": 8.93, "r2": 0.8219}
+          "T+1h": {"mae": 1.20, "rmse": 3.18, "r2": 0.9774},
+          "T+3h": {"mae": 3.62, "rmse": 6.23, "r2": 0.9135},
+          "T+6h": {"mae": 5.64, "rmse": 8.56, "r2": 0.8375}
         },
         "historical_training_mean": {
           "mean_value_ug_m3": 18.80,

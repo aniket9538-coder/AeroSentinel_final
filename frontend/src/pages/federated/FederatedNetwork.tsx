@@ -145,14 +145,29 @@ export const FederatedNetwork: React.FC = () => {
     }
   };
 
+  // Simulate local training execution handler
+  const handleSimulateRound = async (roundId: string) => {
+    try {
+      await federatedService.simulateRound(roundId);
+      showToast(
+        'Genuine local Ridge training executed across municipal nodes! Parameter updates submitted.'
+      );
+      await fetchData(true);
+      await loadRoundDetail(roundId);
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || err?.message || 'Local training execution failed';
+      showToast(msg, 'error');
+      throw err;
+    }
+  };
+
   const onlineNodesCount = nodes.filter(
     (n) => (n.status || '').toUpperCase() === 'ONLINE' || (n.status || '').toUpperCase() === 'TRAINING'
   ).length;
 
-  const totalCumulativeSamples = modelCatalog.reduce(
-    (acc, m) => acc + (m.totalSamples || 0),
-    0
-  );
+  const totalCumulativeSamples = modelCatalog.length > 0
+    ? modelCatalog.reduce((acc, m) => acc + (m.totalSamples || 0), 0)
+    : (activeModel?.totalSamples || 0);
 
   return (
     <PageContainer
@@ -211,14 +226,35 @@ export const FederatedNetwork: React.FC = () => {
           </div>
         )}
 
+        {/* Engineering Simulation Disclaimer Banner */}
+        <div
+          style={{
+            padding: '0.75rem 1rem',
+            borderRadius: '8px',
+            background: 'rgba(245, 158, 11, 0.08)',
+            border: '1px solid rgba(245, 158, 11, 0.25)',
+            color: '#fbbf24',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            fontSize: '0.8rem',
+            lineHeight: 1.4,
+          }}
+        >
+          <AlertCircle size={18} style={{ flexShrink: 0 }} />
+          <span>
+            <strong>Auditable Engineering Demonstration:</strong> Participating municipal nodes operate in local test fixture (Pune) and deterministic synthetic simulation (Mumbai, Delhi) modes. Real-world municipal networks and inter-city data permissions are currently unattached. Operational forecasts remain strictly limited to the Pune geographical domain.
+          </span>
+        </div>
+
         {/* 1. Orchestration Status & Overview Banner */}
         <FederatedStatus
           currentRound={rounds.length}
-          totalNodes={nodes.length || 3}
+          totalNodes={nodes.length}
           activeNodes={onlineNodesCount}
-          status="SYNCHRONIZED"
-          activeModelVersion={activeModel?.modelVersion || 'global-v3'}
-          totalSamples={totalCumulativeSamples || 5400}
+          status={nodes.length > 0 && onlineNodesCount > 0 ? "SYNCHRONIZED" : "STANDBY"}
+          activeModelVersion={activeModel?.modelVersion || (modelCatalog.length > 0 ? modelCatalog[0].modelVersion : 'None')}
+          totalSamples={totalCumulativeSamples}
         />
 
         {/* 2. Municipal Federated Nodes Grid */}
@@ -235,6 +271,7 @@ export const FederatedNetwork: React.FC = () => {
           onSelectRound={(roundId) => loadRoundDetail(roundId)}
           onInitiateRoundClick={() => setIsInitiateModalOpen(true)}
           onTriggerAggregation={handleTriggerAggregation}
+          onSimulateRound={handleSimulateRound}
         />
 
         {/* 5. Consensus Model Lineage & Catalog */}
@@ -245,7 +282,7 @@ export const FederatedNetwork: React.FC = () => {
       <InitiateRoundModal
         isOpen={isInitiateModalOpen}
         onClose={() => setIsInitiateModalOpen(false)}
-        activeModelVersion={activeModel?.modelVersion || 'global-v3'}
+        activeModelVersion={activeModel?.modelVersion || (modelCatalog.length > 0 ? modelCatalog[0].modelVersion : 'global-v1')}
         onSubmit={handleInitiateRound}
       />
     </PageContainer>

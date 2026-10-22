@@ -32,6 +32,7 @@ public class ActionController {
      * Records a municipal authority action against an alert.
      */
     @PostMapping
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('AUTHORITY', 'ADMIN')")
     public ResponseEntity<ActionResponseDto> recordAction(
             @Valid @RequestBody RecordActionRequest request,
             Principal principal
@@ -53,16 +54,17 @@ public class ActionController {
 
     /**
      * Validates that authenticated callers possess AUTHORITY or ADMIN role.
-     * Rejects CITIZEN or ANALYST users with 403 Forbidden.
+     * Rejects unauthenticated callers and CITIZEN or ANALYST users with 403 Forbidden.
      */
     private void enforceAuthorityAuthorization() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && auth.isAuthenticated() && !(auth instanceof AnonymousAuthenticationToken)) {
-            boolean hasAuthorityRole = auth.getAuthorities().stream()
-                    .anyMatch(a -> a.getAuthority().equals("ROLE_AUTHORITY") || a.getAuthority().equals("ROLE_ADMIN"));
-            if (!hasAuthorityRole) {
-                throw new AccessDeniedException("Access denied: Authority operational actions require AUTHORITY or ADMIN role");
-            }
+        if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
+            throw new AccessDeniedException("Access denied: Authentication required for authority operational actions");
+        }
+        boolean hasAuthorityRole = auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_AUTHORITY") || a.getAuthority().equals("ROLE_ADMIN"));
+        if (!hasAuthorityRole) {
+            throw new AccessDeniedException("Access denied: Authority operational actions require AUTHORITY or ADMIN role");
         }
     }
 }

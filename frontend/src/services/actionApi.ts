@@ -2,6 +2,7 @@ import apiClient from './api';
 
 export interface AuthorityActionItem {
   id: string;
+  actionId?: string;
   alertId: string;
   eventId?: string;
   actionType: string;
@@ -10,6 +11,9 @@ export interface AuthorityActionItem {
   performedAt: string;
   eventStatus?: string;
   alertStatus?: string;
+  previousStatus?: string;
+  newStatus?: string;
+  reason?: string;
 }
 
 export interface RecordActionRequest {

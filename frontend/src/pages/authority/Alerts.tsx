@@ -5,6 +5,7 @@ import { useAuthorityQueue } from '../../hooks/useAuthorityQueue';
 import { AuthorityQueueItem } from '../../types/alert';
 import { InspectionForm } from '../../components/authority/InspectionForm';
 import { AuthorityAlertMap } from '../../components/authority/AuthorityAlertMap';
+import { EvidenceFusionTriageCard } from '../../components/authority/EvidenceFusionTriageCard';
 import { eventService } from '../../services/event.service';
 import { PollutionEventContext } from '../../types/event';
 import {
@@ -39,15 +40,18 @@ import {
   ClipboardList,
   PlusCircle,
   Play,
+  History,
 } from 'lucide-react';
 import { actionApi, AuthorityActionItem } from '../../services/actionApi';
 import { inspectionApi } from '../../services/inspectionApi';
+import { FieldTeam } from '../../types/inspection';
+import { authService } from '../../services/auth.service';
 
 export const Alerts: React.FC = () => {
   const [searchParams] = useSearchParams();
   const urlH3 = searchParams.get('h3');
 
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'DISMISSED'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'OPEN' | 'ACKNOWLEDGED' | 'ASSIGNED' | 'IN_INSPECTION' | 'ACTION_TAKEN' | 'RESOLVED' | 'DISMISSED'>('ALL');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // Fetch full queue without backend status filter so client computes accurate live counts across all statuses
@@ -55,6 +59,7 @@ export const Alerts: React.FC = () => {
     items,
     loading,
     error,
+    isUnauthorized,
     selectedAlertId,
     setSelectedAlertId,
     refresh,
@@ -63,11 +68,19 @@ export const Alerts: React.FC = () => {
     dismiss,
   } = useAuthorityQueue();
 
+  const [authenticating, setAuthenticating] = useState<boolean>(false);
+  const [customOfficerEmail, setCustomOfficerEmail] = useState<string>('authority@aerosentinel.gov');
+  const [customOfficerPassword, setCustomOfficerPassword] = useState<string>('password');
+  const [showCustomLogin, setShowCustomLogin] = useState<boolean>(false);
+
+  const currentUserRole = useMemo(() => authService.getRole(), [authenticating]);
+  const isAnalystReadOnly = currentUserRole === 'ANALYST';
+
   const [actionInProgress, setActionInProgress] = useState<boolean>(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [showInspectionModal, setShowInspectionModal] = useState<boolean>(false);
 
-  // F7-P6 Authority Action & Modal state
+  // F7-P6 / F7-P8 Authority Action & Modal state
   const [actions, setActions] = useState<AuthorityActionItem[]>([]);
   const [loadingActions, setLoadingActions] = useState<boolean>(false);
   const [showActionModal, setShowActionModal] = useState<boolean>(false);
@@ -78,12 +91,23 @@ export const Alerts: React.FC = () => {
   const [showDismissModal, setShowDismissModal] = useState<boolean>(false);
   const [dismissalReason, setDismissalReason] = useState<string>('');
 
+  // Reassignment Modal state
+  const [showReassignModal, setShowReassignModal] = useState<boolean>(false);
+  const [reassignTeamId, setReassignTeamId] = useState<string>('');
+  const [reassignReason, setReassignReason] = useState<string>('');
+  const [reassignNotes, setReassignNotes] = useState<string>('');
+  const [fieldTeams, setFieldTeams] = useState<FieldTeam[]>([]);
+  const [loadingTeams, setLoadingTeams] = useState<boolean>(false);
+
   // Live dynamic counts computed from loaded items
   const counts = useMemo(
     () => ({
       ALL: items.length,
       OPEN: items.filter((i) => i.status === 'OPEN').length,
       ACKNOWLEDGED: items.filter((i) => i.status === 'ACKNOWLEDGED').length,
+      ASSIGNED: items.filter((i) => i.status === 'ASSIGNED').length,
+      IN_INSPECTION: items.filter((i) => i.status === 'IN_INSPECTION').length,
+      ACTION_TAKEN: items.filter((i) => i.status === 'ACTION_TAKEN').length,
       RESOLVED: items.filter((i) => i.status === 'RESOLVED').length,
       DISMISSED: items.filter((i) => i.status === 'DISMISSED').length,
     }),
@@ -355,6 +379,57 @@ export const Alerts: React.FC = () => {
     }
   };
 
+  const openReassignModal = async () => {
+    setShowReassignModal(true);
+    setLoadingTeams(true);
+    try {
+      const teams = await inspectionApi.getFieldTeams();
+      setFieldTeams(teams);
+      if (teams.length > 0) {
+        const otherTeam = teams.find((t) => t.id !== selectedAlert?.assignedTeamId);
+        if (otherTeam) {
+          setReassignTeamId(otherTeam.id);
+        } else {
+          setReassignTeamId(teams[0].id);
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingTeams(false);
+    }
+  };
+
+  const handleReassignConfirm = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAlert?.alertId) return;
+    if (!reassignTeamId) {
+      setActionError('Please select a replacement field team.');
+      return;
+    }
+    if (!reassignReason.trim()) {
+      setActionError('Reassignment reason is mandatory.');
+      return;
+    }
+    setActionInProgress(true);
+    setActionError(null);
+    try {
+      await inspectionApi.reassignFieldTeam(selectedAlert.alertId, {
+        newTeamId: reassignTeamId,
+        reason: reassignReason.trim(),
+        notes: reassignNotes.trim() || undefined,
+      });
+      setShowReassignModal(false);
+      setReassignReason('');
+      setReassignNotes('');
+      await refreshAllData();
+    } catch (err: any) {
+      setActionError(err?.response?.data?.message || err?.message || 'Failed to reassign field team');
+    } finally {
+      setActionInProgress(false);
+    }
+  };
+
   const LIFECYCLE_STEPS = [
     { key: 'OPEN', label: '1. Detected', desc: 'Candidate Alert' },
     { key: 'ASSIGNED', label: '2. Assigned', desc: 'Team Dispatched' },
@@ -442,6 +517,90 @@ export const Alerts: React.FC = () => {
           >
             <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#0284c7' }} />
             ACKNOWLEDGED
+          </span>
+        );
+      case 'ASSIGNED':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              padding: '0.2rem 0.55rem',
+              borderRadius: '9999px',
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              background: '#f3e8ff',
+              color: '#7e22ce',
+              border: '1px solid #d8b4fe',
+              letterSpacing: '0.03em',
+            }}
+          >
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#7e22ce' }} />
+            ASSIGNED
+          </span>
+        );
+      case 'IN_INSPECTION':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              padding: '0.2rem 0.55rem',
+              borderRadius: '9999px',
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              background: '#fff7ed',
+              color: '#c2410c',
+              border: '1px solid #fed7aa',
+              letterSpacing: '0.03em',
+            }}
+          >
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#c2410c' }} />
+            IN_INSPECTION
+          </span>
+        );
+      case 'ACTION_TAKEN':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              padding: '0.2rem 0.55rem',
+              borderRadius: '9999px',
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              background: '#f0fdfa',
+              color: '#0f766e',
+              border: '1px solid #99f6e4',
+              letterSpacing: '0.03em',
+            }}
+          >
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#0f766e' }} />
+            ACTION_TAKEN
+          </span>
+        );
+      case 'CLOSED':
+        return (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              padding: '0.2rem 0.55rem',
+              borderRadius: '9999px',
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              background: '#f1f5f9',
+              color: '#475569',
+              border: '1px solid #cbd5e1',
+              letterSpacing: '0.03em',
+            }}
+          >
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#475569' }} />
+            CLOSED
           </span>
         );
       case 'RESOLVED':
@@ -690,7 +849,7 @@ export const Alerts: React.FC = () => {
         }}
       >
         <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          {(['ALL', 'OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'DISMISSED'] as const).map((s) => {
+          {(['ALL', 'OPEN', 'ACKNOWLEDGED', 'ASSIGNED', 'IN_INSPECTION', 'ACTION_TAKEN', 'RESOLVED', 'DISMISSED'] as const).map((s) => {
             const isActive = statusFilter === s;
             const count = counts[s];
             return (
@@ -780,36 +939,198 @@ export const Alerts: React.FC = () => {
           </p>
         </div>
       ) : error ? (
-        <div
-          style={{
-            padding: '2.5rem',
-            textAlign: 'center',
-            background: '#ffffff',
-            borderRadius: '12px',
-            border: '1px solid #fecaca',
-            boxShadow: '0 1px 3px rgba(15, 23, 42, 0.04)',
-          }}
-        >
-          <AlertTriangle size={30} style={{ margin: '0 auto 0.75rem', color: '#dc2626' }} />
-          <p style={{ color: '#dc2626', fontWeight: 700, fontSize: '1rem', marginBottom: '0.25rem' }}>
-            Unable to load authority alert queue
-          </p>
-          <p style={{ color: '#64748b', fontSize: '0.825rem', marginBottom: '1.25rem' }}>{error}</p>
-          <button
-            onClick={() => refresh()}
+        (isUnauthorized || error.toLowerCase().includes('authentication required') || error.includes('401')) ? (
+          <div
             style={{
-              padding: '0.45rem 1.15rem',
-              borderRadius: '6px',
-              background: '#0284c7',
-              color: '#ffffff',
-              border: 'none',
-              fontWeight: 600,
-              cursor: 'pointer',
+              padding: '2.5rem',
+              textAlign: 'center',
+              background: '#ffffff',
+              borderRadius: '12px',
+              border: '1px solid #bfdbfe',
+              boxShadow: '0 2px 8px rgba(2, 132, 199, 0.08)',
+              maxWidth: '560px',
+              margin: '2rem auto',
             }}
           >
-            Retry Connection
-          </button>
-        </div>
+            <div
+              style={{
+                width: '52px',
+                height: '52px',
+                borderRadius: '50%',
+                background: '#e0f2fe',
+                border: '1px solid #bae6fd',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 1rem',
+                color: '#0284c7',
+              }}
+            >
+              <ShieldAlert size={28} />
+            </div>
+            <h3 style={{ color: '#0f172a', fontWeight: 700, fontSize: '1.15rem', marginBottom: '0.4rem' }}>
+              Municipal Authority Authentication Required
+            </h3>
+            <p style={{ color: '#64748b', fontSize: '0.85rem', lineHeight: 1.5, marginBottom: '1.5rem' }}>
+              Access to the municipal alert candidate queue and operational intervention pipeline is restricted to verified authority officers and environmental analysts (Safety Invariant 12).
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'center' }}>
+              <button
+                onClick={async () => {
+                  setAuthenticating(true);
+                  setActionError(null);
+                  try {
+                    await authService.login({ email: customOfficerEmail.trim() || 'authority@aerosentinel.gov', password: 'password' });
+                    await refresh();
+                  } catch (err: any) {
+                    setActionError(err?.response?.data?.message || err?.message || 'Authentication failed');
+                  } finally {
+                    setAuthenticating(false);
+                  }
+                }}
+                disabled={authenticating}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.65rem 1.4rem',
+                  borderRadius: '8px',
+                  background: '#0284c7',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
+                  cursor: authenticating ? 'wait' : 'pointer',
+                  boxShadow: '0 2px 4px rgba(2, 132, 199, 0.25)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <ShieldCheck size={16} />
+                <span>{authenticating ? 'Authenticating Officer Session...' : 'Authenticate as Municipal Authority Officer'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowCustomLogin(!showCustomLogin)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#0284c7',
+                  fontSize: '0.78rem',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                  padding: '0.2rem',
+                }}
+              >
+                {showCustomLogin ? 'Hide Custom Credentials' : 'Sign in with custom authority email'}
+              </button>
+
+              {showCustomLogin && (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setAuthenticating(true);
+                    setActionError(null);
+                    try {
+                      await authService.login({ email: customOfficerEmail.trim() || 'authority@aerosentinel.gov', password: customOfficerPassword });
+                      await refresh();
+                    } catch (err: any) {
+                      setActionError(err?.response?.data?.message || err?.message || 'Authentication failed: Invalid credentials');
+                    } finally {
+                      setAuthenticating(false);
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.5rem',
+                    width: '100%',
+                    maxWidth: '380px',
+                    marginTop: '0.5rem',
+                  }}
+                >
+                  <input
+                    type="text"
+                    value={customOfficerEmail}
+                    onChange={(e) => setCustomOfficerEmail(e.target.value)}
+                    placeholder="officer@aerosentinel.gov"
+                    style={{
+                      width: '100%',
+                      padding: '0.45rem 0.75rem',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '0.825rem',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <input
+                    type="password"
+                    value={customOfficerPassword}
+                    onChange={(e) => setCustomOfficerPassword(e.target.value)}
+                    placeholder="Password"
+                    style={{
+                      width: '100%',
+                      padding: '0.45rem 0.75rem',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '0.825rem',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <button
+                    type="submit"
+                    disabled={authenticating}
+                    style={{
+                      width: '100%',
+                      padding: '0.45rem 0.9rem',
+                      borderRadius: '6px',
+                      background: '#0f172a',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontSize: '0.825rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {authenticating ? 'Verifying Credentials...' : 'Sign In with Credentials'}
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div
+            style={{
+              padding: '2.5rem',
+              textAlign: 'center',
+              background: '#ffffff',
+              borderRadius: '12px',
+              border: '1px solid #fecaca',
+              boxShadow: '0 1px 3px rgba(15, 23, 42, 0.04)',
+            }}
+          >
+            <AlertTriangle size={30} style={{ margin: '0 auto 0.75rem', color: '#dc2626' }} />
+            <p style={{ color: '#dc2626', fontWeight: 700, fontSize: '1rem', marginBottom: '0.25rem' }}>
+              Unable to load authority alert queue
+            </p>
+            <p style={{ color: '#64748b', fontSize: '0.825rem', marginBottom: '1.25rem' }}>{error}</p>
+            <button
+              onClick={() => refresh()}
+              style={{
+                padding: '0.45rem 1.15rem',
+                borderRadius: '6px',
+                background: '#0284c7',
+                color: '#ffffff',
+                border: 'none',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Retry Connection
+            </button>
+          </div>
+        )
       ) : filteredItems.length === 0 ? (
         /* Section 23: Light Operational Empty State */
         <div
@@ -1493,59 +1814,11 @@ export const Alerts: React.FC = () => {
                 )}
               </div>
 
-              {/* Section 6: F5 EVIDENCE & TRIAGE SECTION */}
-              <div
-                style={{
-                  background: '#f8fafc',
-                  borderRadius: '10px',
-                  padding: '1rem',
-                  border: '1px solid #e2e8f0',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 700, color: '#4f46e5', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                    <ShieldAlert size={13} />
-                    <span>F5 Evidence &amp; Triage</span>
-                  </div>
-                  <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                    Consistency: <strong style={{ color: '#4f46e5' }}>{selectedAlert.consistency || eventContext?.evidence?.consistency || 'CONSISTENT'}</strong>
-                  </span>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.65rem' }}>
-                  <div style={{ background: '#ffffff', padding: '0.65rem 0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <span style={{ color: '#64748b', display: 'block', fontSize: '0.68rem', fontWeight: 600 }}>
-                      Evidence Score
-                    </span>
-                    <span style={{ color: '#4f46e5', fontWeight: 800, fontFamily: 'var(--font-mono)', fontSize: '1.05rem' }}>
-                      {selectedAlert.evidenceScore != null ? selectedAlert.evidenceScore.toFixed(3) : 'N/A'}
-                    </span>
-                  </div>
-
-                  <div style={{ background: '#ffffff', padding: '0.65rem 0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <span style={{ color: '#64748b', display: 'block', fontSize: '0.68rem', fontWeight: 600 }}>
-                      Triage State
-                    </span>
-                    <span style={{ color: '#0f172a', fontWeight: 700, fontSize: '0.85rem' }}>
-                      {selectedAlert.triageState || eventContext?.evidence?.triageState || 'ALERT_CANDIDATE'}
-                    </span>
-                  </div>
-
-                  <div style={{ background: '#ffffff', padding: '0.65rem 0.8rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <span style={{ color: '#64748b', display: 'block', fontSize: '0.68rem', fontWeight: 600 }}>
-                      Evidence Signals
-                    </span>
-                    <span style={{ color: '#334155', fontWeight: 700, fontSize: '0.85rem' }}>
-                      {eventContext?.evidence?.signalsCount != null ? `${eventContext.evidence.signalsCount} Signals` : 'Corroborated'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Section 13: Metric Separation Notice */}
-                <div style={{ marginTop: '0.55rem', fontSize: '0.7rem', color: '#64748b' }}>
-                  Authoritative Metric Separation: F3 Risk Score ({selectedAlert.riskScore != null ? selectedAlert.riskScore.toFixed(4) : 'N/A'}) &ne; F5 Evidence Score ({selectedAlert.evidenceScore != null ? selectedAlert.evidenceScore.toFixed(3) : 'N/A'})
-                </div>
-              </div>
+              {/* Section 6: AUTHORITATIVE F5 EVIDENCE FUSION & TRIAGE (Phase 7) */}
+              <EvidenceFusionTriageCard
+                h3Index={selectedAlert.h3Index}
+                onRefreshParent={refreshAllData}
+              />
 
               {/* Section 19: FIELD RESPONSE */}
               <div
@@ -2075,6 +2348,119 @@ export const Alerts: React.FC = () => {
                 <ArrowRight size={14} />
               </Link>
 
+              {/* Section 21.5: Authoritative Lifecycle Audit History Card */}
+              <div
+                data-testid="audit-history-card"
+                style={{
+                  background: '#ffffff',
+                  borderRadius: '10px',
+                  padding: '1rem',
+                  border: '1px solid #e2e8f0',
+                  boxShadow: '0 1px 3px rgba(15, 23, 42, 0.03)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.75rem', fontWeight: 700, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    <History size={14} color="#4f46e5" />
+                    <span>Authoritative Lifecycle Audit History</span>
+                  </div>
+                  <span
+                    style={{
+                      padding: '0.15rem 0.5rem',
+                      borderRadius: '9999px',
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      background: '#eff6ff',
+                      color: '#1d4ed8',
+                      border: '1px solid #bfdbfe',
+                    }}
+                  >
+                    {actions.length} Action{actions.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+
+                {loadingActions ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#64748b', fontSize: '0.8rem', padding: '0.5rem 0' }}>
+                    <RefreshCw size={13} className="animate-spin" />
+                    <span>Loading audit history...</span>
+                  </div>
+                ) : actions.length === 0 ? (
+                  <p style={{ fontSize: '0.8rem', color: '#64748b', margin: 0, fontStyle: 'italic' }}>
+                    No operational actions recorded yet for this alert candidate.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                    {actions.map((act) => (
+                      <div
+                        key={act.id || act.actionId}
+                        data-testid={`audit-action-${act.id || act.actionId}`}
+                        style={{
+                          background: '#f8fafc',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '8px',
+                          padding: '0.65rem 0.8rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.35rem',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <span
+                              style={{
+                                padding: '0.15rem 0.45rem',
+                                borderRadius: '4px',
+                                fontSize: '0.68rem',
+                                fontWeight: 800,
+                                background: '#ede9fe',
+                                color: '#6d28d9',
+                                border: '1px solid #ddd6fe',
+                                textTransform: 'uppercase',
+                              }}
+                            >
+                              {act.actionType}
+                            </span>
+                            {act.previousStatus && act.newStatus && (
+                              <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#475569' }}>
+                                {act.previousStatus} &rarr; <strong style={{ color: '#0f172a' }}>{act.newStatus}</strong>
+                              </span>
+                            )}
+                          </div>
+                          <span style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                            {new Date(act.performedAt).toLocaleString()}
+                          </span>
+                        </div>
+
+                        {act.actionDetails && (
+                          <div style={{ fontSize: '0.78rem', color: '#1e293b', lineHeight: 1.4 }}>
+                            {act.actionDetails}
+                          </div>
+                        )}
+
+                        {act.reason && (
+                          <div
+                            style={{
+                              fontSize: '0.72rem',
+                              color: '#991b1b',
+                              background: '#fef2f2',
+                              padding: '0.25rem 0.5rem',
+                              borderRadius: '4px',
+                              border: '1px solid #fecaca',
+                            }}
+                          >
+                            <strong>Reason:</strong> {act.reason}
+                          </div>
+                        )}
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', fontSize: '0.65rem', color: '#64748b' }}>
+                          <span>Actor: <strong>{act.performedBy || 'System/Authority'}</strong></span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {/* Section 22: Authority Lifecycle Actions */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
                 {actionError && (
@@ -2105,6 +2491,30 @@ export const Alerts: React.FC = () => {
                 )}
 
                 <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                  {/* Analyst Read-Only Mode Banner */}
+                  {isAnalystReadOnly && (
+                    <div
+                      data-testid="banner-analyst-readonly"
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem 1rem',
+                        borderRadius: '8px',
+                        background: '#fffbeb',
+                        border: '1px solid #fde68a',
+                        color: '#92400e',
+                        fontSize: '0.8rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                      }}
+                    >
+                      <Info size={16} style={{ flexShrink: 0 }} />
+                      <span>
+                        <strong>Analyst Read-Only Mode:</strong> Operational lifecycle mutations (acknowledgements, assignments, field actions, dismissals, resolutions) are restricted to municipal Authority Officers and Administrators.
+                      </span>
+                    </div>
+                  )}
+
                   {/* DISMISSED State Banner */}
                   {(currentEventStatus === 'DISMISSED' || selectedAlert.status === 'DISMISSED') && (
                     <div
@@ -2172,7 +2582,7 @@ export const Alerts: React.FC = () => {
                   )}
 
                   {/* Context Actions for OPEN state */}
-                  {currentEventStatus === 'OPEN' && selectedAlert.status !== 'RESOLVED' && selectedAlert.status !== 'DISMISSED' && (
+                  {!isAnalystReadOnly && currentEventStatus === 'OPEN' && selectedAlert.status !== 'RESOLVED' && selectedAlert.status !== 'DISMISSED' && (
                     <>
                       {selectedAlert.status === 'OPEN' && (
                         <button
@@ -2257,7 +2667,7 @@ export const Alerts: React.FC = () => {
                   )}
 
                   {/* Context Actions for ASSIGNED state */}
-                  {currentEventStatus === 'ASSIGNED' && selectedAlert.status !== 'RESOLVED' && selectedAlert.status !== 'DISMISSED' && (
+                  {!isAnalystReadOnly && currentEventStatus === 'ASSIGNED' && selectedAlert.status !== 'RESOLVED' && selectedAlert.status !== 'DISMISSED' && (
                     <>
                       <button
                         type="button"
@@ -2284,6 +2694,30 @@ export const Alerts: React.FC = () => {
                       >
                         {actionInProgress ? <RefreshCw size={14} className="animate-spin" /> : <Play size={15} />}
                         Start Inspection
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="btn-reassign-team"
+                        onClick={openReassignModal}
+                        disabled={actionInProgress}
+                        style={{
+                          padding: '0.65rem 1rem',
+                          borderRadius: '8px',
+                          background: '#f8fafc',
+                          color: '#4338ca',
+                          border: '1px solid #c7d2fe',
+                          fontWeight: 700,
+                          fontSize: '0.85rem',
+                          cursor: actionInProgress ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.4rem',
+                        }}
+                      >
+                        <Users size={15} />
+                        Reassign Team
                       </button>
 
                       <button
@@ -2339,7 +2773,7 @@ export const Alerts: React.FC = () => {
                   )}
 
                   {/* Context Actions for IN_INSPECTION state */}
-                  {currentEventStatus === 'IN_INSPECTION' && selectedAlert.status !== 'RESOLVED' && selectedAlert.status !== 'DISMISSED' && (
+                  {!isAnalystReadOnly && currentEventStatus === 'IN_INSPECTION' && selectedAlert.status !== 'RESOLVED' && selectedAlert.status !== 'DISMISSED' && (
                     <>
                       <button
                         type="button"
@@ -2366,6 +2800,30 @@ export const Alerts: React.FC = () => {
                       >
                         <ClipboardList size={15} />
                         Record Mitigation Action
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="btn-reassign-team-inspection"
+                        onClick={openReassignModal}
+                        disabled={actionInProgress}
+                        style={{
+                          padding: '0.65rem 1rem',
+                          borderRadius: '8px',
+                          background: '#f8fafc',
+                          color: '#4338ca',
+                          border: '1px solid #c7d2fe',
+                          fontWeight: 700,
+                          fontSize: '0.85rem',
+                          cursor: actionInProgress ? 'not-allowed' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.4rem',
+                        }}
+                      >
+                        <Users size={15} />
+                        Reassign Team
                       </button>
 
                       <button
@@ -2397,7 +2855,7 @@ export const Alerts: React.FC = () => {
                   )}
 
                   {/* Context Actions for ACTION_TAKEN state */}
-                  {currentEventStatus === 'ACTION_TAKEN' && selectedAlert.status !== 'RESOLVED' && selectedAlert.status !== 'DISMISSED' && (
+                  {!isAnalystReadOnly && currentEventStatus === 'ACTION_TAKEN' && selectedAlert.status !== 'RESOLVED' && selectedAlert.status !== 'DISMISSED' && (
                     <>
                       <button
                         type="button"
@@ -2887,6 +3345,174 @@ export const Alerts: React.FC = () => {
                 >
                   {actionInProgress && <RefreshCw size={14} className="animate-spin" />}
                   Confirm Dismissal
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* Reassign Field Team Modal */}
+      {showReassignModal && selectedAlert && (
+        <div
+          data-testid="modal-reassign-team"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.55)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              maxWidth: '520px',
+              width: '100%',
+              background: '#ffffff',
+              borderRadius: '12px',
+              padding: '1.5rem',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Users size={18} color="#4338ca" />
+                <h4 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#0f172a' }}>
+                  Reassign Field Team
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReassignModal(false)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.25rem', color: '#64748b' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <p style={{ fontSize: '0.8rem', color: '#475569', marginBottom: '1rem' }}>
+              Reassign this incident to another response team. A documented operational reason is required for full audit provenance.
+            </p>
+
+            <form onSubmit={handleReassignConfirm} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  Replacement Field Team *
+                </label>
+                {loadingTeams ? (
+                  <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Loading field teams...</div>
+                ) : (
+                  <select
+                    data-testid="select-reassign-team"
+                    value={reassignTeamId}
+                    onChange={(e) => setReassignTeamId(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.6rem',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '0.85rem',
+                      color: '#0f172a',
+                      background: '#ffffff',
+                    }}
+                  >
+                    {fieldTeams.map((team) => (
+                      <option key={team.id} value={team.id}>
+                        {team.teamName} ({team.status || 'AVAILABLE'}) &middot; {team.contactNumber || 'Squad'}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  Mandatory Reassignment Reason *
+                </label>
+                <textarea
+                  data-testid="textarea-reassign-reason"
+                  rows={3}
+                  value={reassignReason}
+                  onChange={(e) => setReassignReason(e.target.value)}
+                  placeholder="e.g. Initial squad assigned to chemical containment, specialized sensor required, geographic proximity..."
+                  style={{
+                    width: '100%',
+                    padding: '0.6rem',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '0.825rem',
+                    color: '#0f172a',
+                    fontFamily: 'inherit',
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: '#334155', marginBottom: '0.35rem' }}>
+                  Additional Operational Notes
+                </label>
+                <input
+                  type="text"
+                  data-testid="input-reassign-notes"
+                  value={reassignNotes}
+                  onChange={(e) => setReassignNotes(e.target.value)}
+                  placeholder="Optional dispatch coordinates, priority handoff instructions..."
+                  style={{
+                    width: '100%',
+                    padding: '0.55rem 0.75rem',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '0.825rem',
+                    color: '#0f172a',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowReassignModal(false)}
+                  disabled={actionInProgress}
+                  style={{
+                    padding: '0.6rem 1rem',
+                    borderRadius: '6px',
+                    background: '#f1f5f9',
+                    border: '1px solid #cbd5e1',
+                    color: '#475569',
+                    fontWeight: 600,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  data-testid="btn-submit-reassign-confirm"
+                  disabled={actionInProgress || !reassignReason.trim() || !reassignTeamId}
+                  style={{
+                    padding: '0.6rem 1.25rem',
+                    borderRadius: '6px',
+                    background: '#4338ca',
+                    border: 'none',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: actionInProgress || !reassignReason.trim() || !reassignTeamId ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                  }}
+                >
+                  {actionInProgress && <RefreshCw size={14} className="animate-spin" />}
+                  Confirm Reassignment
                 </button>
               </div>
             </form>

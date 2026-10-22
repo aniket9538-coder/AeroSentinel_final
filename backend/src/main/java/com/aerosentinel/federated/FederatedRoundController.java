@@ -6,6 +6,7 @@ import com.aerosentinel.federated.dto.AggregationResponse;
 import com.aerosentinel.federated.dto.RoundDetailResponse;
 import com.aerosentinel.federated.dto.RoundResponse;
 import com.aerosentinel.federated.dto.StartRoundRequest;
+import com.aerosentinel.federated.dto.UpdateResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,9 +19,11 @@ import java.util.List;
 public class FederatedRoundController {
 
     private final FederatedRoundService roundService;
+    private final FederatedTrainingService trainingService;
 
-    public FederatedRoundController(FederatedRoundService roundService) {
+    public FederatedRoundController(FederatedRoundService roundService, FederatedTrainingService trainingService) {
         this.roundService = roundService;
+        this.trainingService = trainingService;
     }
 
     /**
@@ -50,6 +53,30 @@ public class FederatedRoundController {
 
         RoundResponse response = roundService.startRound(baseVersion, minQuorum, participatingNodes);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /**
+     * POST /api/v1/federated/rounds/{roundId}/simulate-round
+     * Simulates genuine local training across all enrolled nodes and submits updates to the round.
+     */
+    @PostMapping("/{roundId}/simulate-round")
+    public ResponseEntity<List<UpdateResponse>> simulateRound(@PathVariable String roundId) {
+        List<UpdateResponse> updates = trainingService.simulateRoundTraining(roundId);
+        return ResponseEntity.ok(updates);
+    }
+
+    /**
+     * POST /api/v1/federated/rounds/{roundId}/train-node/{nodeId}
+     * Executes local training for a specific enrolled node and submits its update.
+     */
+    @PostMapping("/{roundId}/train-node/{nodeId}")
+    public ResponseEntity<UpdateResponse> trainNode(
+            @PathVariable String roundId,
+            @PathVariable String nodeId
+    ) {
+        var nodeUpdate = trainingService.trainLocalNode(roundId, null, nodeId);
+        UpdateResponse response = roundService.submitNodeUpdate(roundId, nodeUpdate);
+        return ResponseEntity.ok(response);
     }
 
     /**
