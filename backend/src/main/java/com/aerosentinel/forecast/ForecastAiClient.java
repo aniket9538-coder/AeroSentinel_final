@@ -82,6 +82,10 @@ public class ForecastAiClient {
         this.httpClient = httpClient;
     }
 
+    public String getServiceUrl() {
+        return serviceUrl;
+    }
+
     /**
      * Backward-compatibility constructor for tests migrating from process bridge.
      */

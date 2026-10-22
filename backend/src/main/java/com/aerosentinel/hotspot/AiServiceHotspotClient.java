@@ -71,6 +71,10 @@ public class AiServiceHotspotClient {
                 .build();
     }
 
+    public String getServiceUrl() {
+        return serviceUrl;
+    }
+
     /**
      * Executes inference on the trained ML model for a 36-feature snapshot.
      *
