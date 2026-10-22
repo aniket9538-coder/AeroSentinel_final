@@ -1,0 +1,2 @@
+ai-service/models/artifacts/forecast_regressors_v1.joblib filter=lfs diff=lfs merge=lfs -text
+ai-service/models/artifacts/hotspot_classifier_v1.joblib filter=lfs diff=lfs merge=lfs -text

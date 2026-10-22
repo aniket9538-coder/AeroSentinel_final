@@ -126,6 +126,8 @@ ai-service/data/raw/*
 !ai-service/data/raw/.gitkeep
 ai-service/models/artifacts/*.joblib
 *.joblib
+!ai-service/models/artifacts/forecast_regressors_v1.joblib
+!ai-service/models/artifacts/hotspot_classifier_v1.joblib
 *.nc
 
 # Temporary inspection folders
